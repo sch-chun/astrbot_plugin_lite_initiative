@@ -1,0 +1,87 @@
+{
+  "schema": {
+    "timezone": {
+      "type": "string",
+      "description": "用户时区，例如 Asia/Shanghai",
+      "default": "Asia/Shanghai",
+      "required": false
+    },
+    "sleep_hours": {
+      "type": "string",
+      "description": "睡眠时段，格式 HH:MM-HH:MM，例如 23:00-08:00，支持跨天",
+      "default": "23:00-08:00",
+      "required": false
+    },
+    "max_triggers": {
+      "type": "number",
+      "description": "最大触发器个数，超出时最早创建的触发器会被丢弃",
+      "default": 20,
+      "required": false
+    },
+    "timeout_decision": {
+      "group": true,
+      "description": "超时决策相关配置"
+    },
+    "decision_prompt": {
+      "type": "string",
+      "description": "决策 AI 的系统提示词，用于告诉 AI 如何判断是否创建触发器",
+      "default": "你是一个主动闲聊决策助手。根据当前对话上下文和用户沉默时间，判断是否需要在未来某个时间点主动发起聊天。如果决定发起，请使用本插件的触发器管理工具创建触发器。",
+      "required": false
+    },
+    "decision_max_history_messages": {
+      "type": "number",
+      "description": "超时决策时提供给 AI 的最大历史消息条数",
+      "default": 20,
+      "required": false
+    },
+    "decision_timeout_seconds": {
+      "type": "number",
+      "description": "AI 回复后等待用户回复的超时时间（秒），超时后触发决策",
+      "default": 300,
+      "required": false
+    },
+    "daily_analysis": {
+      "group": true,
+      "description": "每日定时分析配置"
+    },
+    "daily_analysis_times": {
+      "type": "string",
+      "description": "每日分析时间点，多个用逗号分隔，格式 HH:MM",
+      "default": "09:00,14:00,21:00",
+      "required": false
+    },
+    "daily_analysis_prompt": {
+      "type": "string",
+      "description": "每日分析 AI 的系统提示词",
+      "default": "你是一个对话分析助手。分析最近的历史对话，判断是否需要在未来主动发起闲聊。如果认为合适，使用触发器管理工具创建触发器，指定合适的触发时间、额外提示词等。",
+      "required": false
+    },
+    "daily_analysis_max_history_messages": {
+      "type": "number",
+      "description": "每日分析时提供给 AI 的最大历史消息条数",
+      "default": 50,
+      "required": false
+    },
+    "inactive_threshold_hours": {
+      "type": "number",
+      "description": "用户在多少小时内无任何消息时，停用每日分析功能（设为0表示永不停止）",
+      "default": 24,
+      "required": false
+    },
+    "inject_date_tip": {
+      "type": "boolean",
+      "description": "是否在决策/分析提示词中注入当前日期和节假日信息",
+      "default": true,
+      "required": false
+    },
+    "trigger_persist": {
+      "type": "boolean",
+      "description": "是否持久化保存触发器队列（重启后恢复）",
+      "default": true,
+      "required": false
+    }
+  },
+  "ui": {
+    "group_order": ["timeout_decision", "daily_analysis"]
+  }
+}
