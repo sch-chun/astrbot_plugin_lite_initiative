@@ -50,10 +50,16 @@ class LiteInitiativePlugin(Star):
         # 注册 LLM 工具
         self._llm_funcs = LLMFunctions(self)
         try:
-            self.context.activate_llm_tool("list_triggers")
-            self.context.activate_llm_tool("create_trigger")
-            self.context.activate_llm_tool("delete_trigger")
-            self.context.activate_llm_tool("update_trigger")
+            # 激活工具
+            for tool_name in ["list_triggers", "create_trigger", "delete_trigger", "update_trigger"]:
+                self.context.activate_llm_tool(tool_name)
+            
+            # 手动设置 handler_module_path（AstrBot 的 spec_to_func 没有自动设置）
+            llm_tools = self.context.provider_manager.llm_tools
+            for func_tool in llm_tools.func_list:
+                if func_tool.name in ["list_triggers", "create_trigger", "delete_trigger", "update_trigger"]:
+                    func_tool.handler_module_path = self.__class__.__module__
+            
             logger.info("[LiteInitiative] LLM 工具注册成功")
         except Exception as e:
             logger.warning(f"[LiteInitiative] LLM 工具注册失败: {e}")
