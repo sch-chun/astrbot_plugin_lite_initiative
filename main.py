@@ -149,10 +149,6 @@ class LiteInitiativePlugin(Star):
     async def _on_user_message(self, event: AstrMessageEvent):
         """用户发消息：更新活跃时间，清空本会话所有触发器"""
 
-        # 只处理私聊
-        if event.message_obj.group_id:
-            return
-
         umo = event.unified_msg_origin
 
         # 白名单检查
@@ -249,12 +245,10 @@ class LiteInitiativePlugin(Star):
             umo for umo, last in self._last_user_msg.items()
             if inactive_h <= 0 or (now_ts - last) < inactive_h * 3600
         ]
+        # 过滤白名单
+        targets = [umo for umo in targets if self._is_user_whitelisted(umo)]
         if not targets:
             return
-        
-        for umo in targets:
-            if not self._is_user_whitelisted(umo):
-                continue
 
         logger.info(f"[LiteInitiative] 每日分析: {len(targets)} 个会话")
         for umo in targets:
