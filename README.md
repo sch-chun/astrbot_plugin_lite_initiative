@@ -1,14 +1,140 @@
-# astrbot-plugin-helloworld
+# LiteInitiative - AI 驱动的智能主动闲聊插件
 
-AstrBot 插件模板 / A template plugin for AstrBot plugin feature
+简体中文
 
-> [!NOTE]
-> This repo is just a template of [AstrBot](https://github.com/AstrBotDevs/AstrBot) Plugin.
-> 
-> [AstrBot](https://github.com/AstrBotDevs/AstrBot) is an agentic assistant for both personal and group conversations. It can be deployed across dozens of mainstream instant messaging platforms, including QQ, Telegram, Feishu, DingTalk, Slack, LINE, Discord, Matrix, etc. In addition, it provides a reliable and extensible conversational AI infrastructure for individuals, developers, and teams. Whether you need a personal AI companion, an intelligent customer support agent, an automation assistant, or an enterprise knowledge base, AstrBot enables you to quickly build AI applications directly within your existing messaging workflows.
+## 简介
 
-# Supports
+LiteInitiative 是一个让 AI 能够主动发起对话的 AstrBot 插件。通过超时决策和定时分析机制，AI 可以自主判断并创建触发器，在合适的时机主动与用户交流。
 
-- [AstrBot Repo](https://github.com/AstrBotDevs/AstrBot)
-- [AstrBot Plugin Development Docs (Chinese)](https://docs.astrbot.app/dev/star/plugin-new.html)
-- [AstrBot Plugin Development Docs (English)](https://docs.astrbot.app/en/dev/star/plugin-new.html)
+## 功能特性
+
+### 🕐 超时决策
+- AI 回复用户后，启动超时计时器
+- 超时后调用 AI 判断是否需要主动说话
+- 如果需要，创建定时触发器执行主动消息
+
+### 📅 每日定时分析
+- 在设定的时间点分析历史对话
+- AI 自主判断是否需要创建主动触发器
+- 支持自定义分析时间
+
+### 🎯 触发器队列管理
+AI 可通过以下函数工具管理触发器：
+- `list_triggers` - 列出所有触发器
+- `create_trigger` - 创建新触发器
+- `delete_trigger` - 删除触发器
+- `update_trigger` - 更新触发器
+
+### ⚙️ 灵活配置
+- 时区设置
+- 睡眠时段（AI 不会在该时段主动发言）
+- 超时等待时间
+- 最大触发器数量限制
+- 自定义决策提示词
+
+## 配置项说明
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `timezone` | string | "Asia/Shanghai" | 时区 |
+| `sleep_start` | string | "23:00" | 睡眠开始时间 |
+| `sleep_end` | string | "07:00" | 睡眠结束时间 |
+| `timeout_seconds` | int | 300 | AI 回复后等待超时时间（秒） |
+| `daily_analysis_time` | string | "21:00" | 每日定时分析时间 |
+| `max_triggers` | int | 5 | 最大同时存在的触发器数量 |
+| `decision_prompt` | string | (见下方) | AI 决策时的系统提示词 |
+
+### 默认 decision_prompt
+
+```
+你是主动闲聊决策专家。根据当前对话上下文，判断是否需要创建一个触发器来主动与用户交流。
+
+判断标准：
+1. 用户表现出情绪低落、孤独或需要安慰
+2. 话题具有延续性，可以自然地继续
+3. 用户长时间没有回应，可能需要主动关心
+4. 有趣的内容想要与用户分享
+
+如果需要创建触发器，请返回 JSON 格式：
+{
+  "should_trigger": true,
+  "reason": "判断理由",
+  "trigger_time": "期望触发的时间（可选，格式：H:M 或 +M 表示分钟）",
+  "content": "想要说的话"
+}
+
+如果不需要创建触发器：
+{
+  "should_trigger": false,
+  "reason": "不需要触发的原因"
+}
+```
+
+## 工作原理
+
+```
+用户发送消息 → AI 回复 → 启动超时计时器
+                          ↓
+                    超时触发 → AI 决策是否需要主动说话
+                          ↓
+                    是 → 创建触发器 → 定时执行主动消息
+                    否 → 等待用户下次消息
+```
+
+### 每日分析流程
+
+```
+定时任务触发 → 获取历史对话 → AI 分析上下文
+                          ↓
+                    AI 决策是否创建触发器
+                          ↓
+                    是 → 创建触发器
+                    否 → 静默等待
+```
+
+## 安装方法
+
+1. 将插件文件复制到 AstrBot 插件目录：
+   ```
+   cp -r astrbot_plugin_lite_initiative <astrbot_plugins_path>/
+   ```
+
+2. 重启 AstrBot 服务
+
+3. 在配置页面启用插件并设置参数
+
+## 权限要求
+
+确保插件具有以下权限：
+- 发送消息
+- 创建定时任务
+- 读取对话历史
+
+## 依赖
+
+- AstrBot >= 4.16.0
+- Python 3.10+
+
+无额外第三方依赖，仅使用 Python 标准库和 AstrBot 核心 API。
+
+## 注意事项
+
+1. 睡眠时段内不会创建新的触发器
+2. 触发器数量达到上限后，AI 决策会考虑清理旧触发器
+3. 用户主动发送消息时会清除所有超时触发器
+4. 建议为 AI 配置合适的提示词以获得更好的主动对话体验
+
+## 更新日志
+
+### v0.1.0
+- 初始版本
+- 支持超时决策和每日定时分析
+- AI 可通过函数工具管理触发器队列
+
+## 许可证
+
+MIT License
+
+## 问题反馈
+
+如遇到问题或有任何建议，请提交 Issue：https://github.com/sch-chun/astrbot_plugin_lite_initiative/issues
