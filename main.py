@@ -9,24 +9,17 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import re
 import time
-import uuid
-from dataclasses import dataclass, field
-from datetime import datetime, time as dt_time
-from typing import Any, Dict, List, Optional, Tuple
 
 from astrbot.api import logger
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
+from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 
 # 兼容导入
 try:
     from astrbot.core.cron.events import CronMessageEvent
     from astrbot.core.astr_main_agent import build_main_agent, MainAgentBuildConfig
-    from astrbot.core.provider.entities import ProviderRequest
     from astrbot.core.platform.message_session import MessageSession
-    from astrbot.core.pipeline.context_utils import call_event_hook
     from astrbot.core.star.star_handler import EventType
     HAS_AGENT_PIPELINE = True
 except ImportError:
@@ -37,7 +30,6 @@ try:
     HAS_LLM_TOOL = True
 except ImportError:
     HAS_LLM_TOOL = False
-
     def llm_tool(*args, **kwargs):
         def decorator(func):
             return func
@@ -49,147 +41,11 @@ try:
 except ImportError:
     HAS_NEW_MESSAGE_API = False
 
-# ──────────────────────────── 工具函数 ────────────────────────────
+# 本地模块导入
+from utils import _get_now_tz, _parse_time_str, _is_in_sleep_hours, _format_time_delta, _parse_trigger_time
+from models import Trigger, SessionRuntime
+from tools import LLMFunctions
 
-def _get_now_tz(tz_name: str | None) -> datetime:
-    try:
-        if tz_name:
-            import zoneinfo
-            try:
-                return datetime.now(zoneinfo.ZoneInfo(tz_name))
-            except (zoneinfo.ZoneInfoNotFoundError, ValueError):
-                logger.warning(f"[LiteInitiative] 无效时区 '{tz_name}'，使用系统默认时区")
-    except ImportError:
-        try:
-            from backports import zoneinfo
-            return datetime.now(zoneinfo.ZoneInfo(tz_name))
-        except Exception:
-            pass
-    return datetime.now()
-
-def _parse_time_str(s: str) -> Optional[Tuple[int, int]]:
-    s = s.strip()
-    m = re.match(r"^([01]?\d|2[0-3]):([0-5]\d)$", s)
-    if not m:
-        return None
-    return int(m.group(1)), int(m.group(2))
-
-def _is_in_sleep_hours(now: datetime, sleep_range: str) -> bool:
-    if not sleep_range or "-" not in sleep_range:
-        return False
-    parts = sleep_range.split("-", 1)
-    t1 = _parse_time_str(parts[0])
-    t2 = _parse_time_str(parts[1])
-    if not t1 or not t2:
-        return False
-    start = dt_time(t1[0], t1[1])
-    end = dt_time(t2[0], t2[1])
-    current = now.time()
-    if start <= end:
-        return start <= current <= end
-    return current >= start or current <= end
-
-def _format_time_delta(seconds: float) -> str:
-    if seconds < 0:
-        return "0分钟"
-    minutes = int(seconds / 60)
-    hours = int(minutes / 60)
-    days = int(hours / 24)
-    if days > 0:
-        rem_h = hours % 24
-        if rem_h > 0:
-            return f"{days}天{rem_h}小时"
-        return f"{days}天"
-    if hours > 0:
-        rem_m = minutes % 60
-        if rem_m > 0:
-            return f"{hours}小时{rem_m}分钟"
-        return f"{hours}小时"
-    if minutes > 0:
-        return f"{minutes}分钟"
-    return "不到1分钟"
-
-def _parse_trigger_time(raw: str, now: datetime, tz: Optional[str]) -> Optional[float]:
-    raw = raw.strip()
-    if not raw:
-        return None
-    m_rel = re.match(r"^(\d{1,2}:\d{2}:\d{2})\s*后$", raw)
-    if m_rel:
-        secs_parts = m_rel.group(1).split(":")
-        if len(secs_parts) == 3:
-            secs = int(secs_parts[0]) * 3600 + int(secs_parts[1]) * 60 + int(secs_parts[2])
-            return now.timestamp() + secs
-    abs_time = None
-    try:
-        abs_time = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        try:
-            abs_time = datetime.strptime(raw, "%Y-%m-%d %H:%M")
-        except ValueError:
-            abs_time = None
-    if abs_time:
-        return abs_time.timestamp()
-    t = _parse_time_str(raw)
-    if t:
-        target = now.replace(hour=t[0], minute=t[1], second=0, microsecond=0)
-        if target <= now:
-            target = target.replace(day=target.day + 1)
-        return target.timestamp()
-    return None
-
-# ──────────────────────────── 数据模型 ────────────────────────────
-
-@dataclass
-class Trigger:
-    trigger_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
-    fire_at_unix: float = 0.0
-    session: str = ""
-    extra_prompt: str = ""
-    use_agent: bool = True
-    source: str = "unknown"
-    created_at: float = field(default_factory=time.time)
-    extra: Dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict:
-        return {
-            "trigger_id": self.trigger_id,
-            "fire_at_unix": self.fire_at_unix,
-            "session": self.session,
-            "extra_prompt": self.extra_prompt,
-            "use_agent": self.use_agent,
-            "source": self.source,
-            "created_at": self.created_at,
-            "extra": self.extra,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> Trigger:
-        t = cls()
-        for k, v in data.items():
-            if hasattr(t, k):
-                setattr(t, k, v)
-        return t
-
-@dataclass
-class SessionRuntime:
-    last_ai_reply_unix: float = 0.0
-    timeout_fire_task: Optional[Any] = None
-    last_user_msg_unix: float = 0.0
-
-    def to_dict(self) -> dict:
-        return {
-            "last_ai_reply_unix": self.last_ai_reply_unix,
-            "last_user_msg_unix": self.last_user_msg_unix,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> SessionRuntime:
-        return cls(
-            last_ai_reply_unix=data.get("last_ai_reply_unix", 0.0),
-            last_user_msg_unix=data.get("last_user_msg_unix", 0.0),
-        )
-
-# ──────────────────────────── 主插件类 ────────────────────────────
 
 @register(
     "astrbot_plugin_lite_initiative",
@@ -216,6 +72,7 @@ class LiteInitiativePlugin(Star):
         self._load_triggers()
         self._load_states()
         if HAS_LLM_TOOL:
+            self._llm_funcs = LLMFunctions(self)
             self.context.activate_llm_tool("list_triggers")
             self.context.activate_llm_tool("create_trigger")
             self.context.activate_llm_tool("delete_trigger")
@@ -321,12 +178,12 @@ class LiteInitiativePlugin(Star):
         return int(self._get_cfg("timeout_decision", "decision_timeout_seconds") or 300)
 
     def _get_decision_prompt(self) -> str:
-        return self._get_cfg("timeout_decision", "decision_prompt") or self._get_cfg("decision_prompt") or "你是一个主动闲聊决策助手。"
+        return self._get_cfg("timeout_decision", "decision_prompt") or "你是一个主动闲聊决策助手。"
 
     def _get_decision_max_history(self) -> int:
         return int(self._get_cfg("timeout_decision", "decision_max_history_messages") or 20)
 
-    def _get_daily_analysis_times(self) -> List[Tuple[int, int]]:
+    def _get_daily_analysis_times(self):
         raw = self._get_cfg("daily_analysis", "daily_analysis_times") or "09:00,14:00,21:00"
         result = []
         for part in raw.split(","):
@@ -337,7 +194,7 @@ class LiteInitiativePlugin(Star):
         return result
 
     def _get_daily_analysis_prompt(self) -> str:
-        return self._get_cfg("daily_analysis", "daily_analysis_prompt") or self._get_cfg("daily_analysis_prompt") or "你是一个对话分析助手。"
+        return self._get_cfg("daily_analysis", "daily_analysis_prompt") or "你是一个对话分析助手。"
 
     def _get_daily_analysis_max_history(self) -> int:
         return int(self._get_cfg("daily_analysis", "daily_analysis_max_history_messages") or 50)
@@ -463,133 +320,6 @@ class LiteInitiativePlugin(Star):
         if end <= now:
             end = end.replace(day=end.day + 1)
         return end.timestamp()
-
-    # ─────────────────────── LLM 工具 ───────────────────────
-    @llm_tool(name="list_triggers")
-    async def _tool_list_triggers(self, event: AstrMessageEvent, session: str = "") -> str:
-        """列出当前所有待执行的触发器，用于 AI 决策时查看已有触发器队列。
-
-        Args:
-            session (string, optional): 过滤指定会话，留空则列出全部。
-        """
-        tlist = self._list_triggers_for_session(session)
-        if not tlist:
-            return "当前没有待执行的触发器。"
-
-        now_ts = time.time()
-        lines = [f"当前共有 {len(tlist)} 个触发器："]
-        for i, t in enumerate(tlist, 1):
-            fire_dt = datetime.fromtimestamp(t["fire_at_unix"])
-            tz = self._get_tz()
-            try:
-                import zoneinfo
-                if tz:
-                    fire_str = fire_dt.astimezone(zoneinfo.ZoneInfo(tz)).strftime("%Y-%m-%d %H:%M:%S")
-                else:
-                    fire_str = fire_dt.strftime("%Y-%m-%d %H:%M:%S")
-            except Exception:
-                fire_str = fire_dt.strftime("%Y-%m-%d %H:%M:%S")
-            remaining = t["fire_at_unix"] - now_ts
-            status = (
-                "⚠️ 已过期" if remaining <= 0 else f"⏳ {_format_time_delta(remaining)}后触发"
-            )
-            sid = t.get("session") or "当前"
-            src_name = t.get("source", "unknown")
-            use_agent = t.get("use_agent", True)
-            extra_prompt_preview = (t.get("extra_prompt") or "无")[:30]
-            lines.append(
-                f"{i}. [{t['trigger_id']}] 会话={sid} | "
-                f"触发时间={fire_str} ({status}) | 来源={src_name} | "
-                f"agent={use_agent} | 提示词={extra_prompt_preview}"
-            )
-        return "\n".join(lines)
-
-    @llm_tool(name="create_trigger")
-    async def _tool_create_trigger(
-        self,
-        event: AstrMessageEvent,
-        fire_at_unix: float,
-        session: str = "",
-        extra_prompt: str = "",
-        use_agent: bool = True,
-        source: str = "manual",
-    ) -> str:
-        """创建一个新的触发器。注意：创建后不能回溯删除，只能删除。
-
-        Args:
-            fire_at_unix (number): 触发时间（UNIX 时间戳，秒）。
-            session (string, optional): 会话 ID，留空则使用当前会话。
-            extra_prompt (string, optional): 给 AI 的额外提示词（说什么、怎么说、是否需要使用 Agent 能力等）。
-            use_agent (boolean, optional): 是否使用 Agent 能力处理此触发器。
-            source (string, optional): 触发器来源，通常由 AI 传入 "timeout" 或 "daily_analysis"。
-        """
-        if not session:
-            session = event.unified_msg_origin
-
-        if self._check_sleep_hours(fire_at_unix):
-            now_ts = time.time()
-            remaining = fire_at_unix - now_ts
-            if remaining > 0:
-                sleep_end = self._calc_sleep_end_unix()
-                if sleep_end and sleep_end < fire_at_unix:
-                    pass
-                else:
-                    return "❌ 创建失败：触发时间落在睡眠时段内，触发器会被直接丢弃。请在睡眠时段外创建。"
-            else:
-                return "❌ 创建失败：触发时间已过期。"
-
-        t = self._create_trigger_internal(
-            fire_at_unix=fire_at_unix,
-            session=session,
-            extra_prompt=extra_prompt,
-            use_agent=use_agent,
-            source=source,
-        )
-        if not t:
-            return "❌ 创建触发器失败，请检查参数或触发时间。"
-        fire_str = datetime.fromtimestamp(fire_at_unix).strftime("%Y-%m-%d %H:%M:%S")
-        return f"✅ 触发器已创建：ID={t.trigger_id}，触发时间={fire_str}，会话={session}"
-
-    @llm_tool(name="delete_trigger")
-    async def _tool_delete_trigger(
-        self, event: AstrMessageEvent, trigger_id: str
-    ) -> str:
-        """删除一个已有的触发器。删除后不可恢复。
-
-        Args:
-            trigger_id (string): 要删除的触发器 ID。
-        """
-        if self._delete_trigger_internal(trigger_id):
-            return f"✅ 触发器 {trigger_id} 已成功删除。"
-        return f"❌ 未找到触发器 {trigger_id}，请使用 list_triggers 确认 ID。"
-
-    @llm_tool(name="update_trigger")
-    async def _tool_update_trigger(
-        self,
-        event: AstrMessageEvent,
-        trigger_id: str,
-        fire_at_unix: Optional[float] = None,
-        extra_prompt: Optional[str] = None,
-        use_agent: Optional[bool] = None,
-    ) -> str:
-        """修改一个已有的触发器。不可修改触发会话（session）和来源（source）。
-
-        Args:
-            trigger_id (string): 要修改的触发器 ID。
-            fire_at_unix (number, optional): 新的触发时间（UNIX 时间戳）。
-            extra_prompt (string, optional): 新的额外提示词。
-            use_agent (boolean, optional): 是否使用 Agent 能力。
-        """
-        t = self._update_trigger_internal(
-            trigger_id=trigger_id,
-            fire_at_unix=fire_at_unix,
-            extra_prompt=extra_prompt,
-            use_agent=use_agent,
-        )
-        if not t:
-            return f"❌ 更新失败：未找到触发器 {trigger_id} 或新触发时间在睡眠时段内。"
-        fire_str = datetime.fromtimestamp(t.fire_at_unix).strftime("%Y-%m-%d %H:%M:%S")
-        return f"✅ 触发器 {trigger_id} 已更新：触发时间={fire_str}，agent={t.use_agent}，提示词长度={len(t.extra_prompt)}"
 
     # ─────────────────────── 消息事件 ───────────────────────
     @filter.on_llm_response()
