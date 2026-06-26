@@ -53,10 +53,12 @@ class LLMFunctions:
 
     @llm_tool(name="list_triggers")
     async def list_triggers(self, event: AstrMessageEvent, session: str = "") -> str:
-        """【主动闲聊插件专用】列出当前所有的【主动闲聊触发器】（非持久任务）。
+        """列出当前所有的主动闲聊触发器（临时性任务，用户发新消息后可能被清空）。
 
-        注意：这里列出的触发器都是临时性的，用户发新消息后可能被清空。
-        要查看持久性的定时任务（如闹钟、提醒），请使用 `future_task` 的相关查询功能。
+        注意：要查看持久性定时任务（如闹钟、提醒），请使用 future_task 的相关查询功能。
+
+        Args:
+            session(string): 会话ID，不填则默认为当前会话
         """
         if not session:
             session = event.unified_msg_origin
@@ -66,43 +68,25 @@ class LLMFunctions:
     async def create_trigger(
         self,
         event: AstrMessageEvent,
-        fire_at_str: str,          # 自然语言时间字符串
+        fire_at_str: str,
         session: str = "",
         extra_prompt: str = "",
         use_agent: bool = True,
     ) -> str:
-        """【主动闲聊插件专用】创建一个临时的主动对话触发器。
+        """创建一个临时的主动对话触发器。
 
-        ⚠️ 重要约束：
-        - 此触发器用于 AI 在用户沉默时主动发起闲聊，属于“临时性”任务。
-        - **一旦用户发送任何新消息，本会话下的此类触发器有可能被自动清空。**
-        - 如果你需要创建“持久性”的定时提醒、闹钟、周期性报告（即使用户发消息也不会消失），
-        请务必使用系统内置工具 `future_task`，而不是本工具。
+        ⚠️ 重要约束：此触发器用于 AI 在用户沉默时主动发起闲聊，属于"临时性"任务。
+        一旦用户发送任何新消息，本会话下的此类触发器有可能被自动清空。
+        如需创建持久性定时提醒、闹钟、周期性报告，请务必使用系统内置工具 future_task。
 
-        适用场景：
-        - AI 判断用户情绪低落，想在 2 小时后主动关心一下。
-        - 每日分析后决定在下午主动分享一个有趣的话题。
-
-        不适用场景：
-        - 用户明确说“明天 8 点叫我起床”、“每小时提醒我喝水” → 请用 `future_task`。
-
-        时间格式支持：
-        - "21:30:00" -> 今天 21:30，若已过则次日
-        - "After 1 hour 30 minutes" -> 1.5 小时后
-        - "2025-12-31 23:59:59" -> 指定日期时间
+        适用场景：AI 判断用户情绪低落想主动关心、每日分析后决定分享有趣话题。
+        不适用场景：用户明确说"明天8点叫我起床"、"每小时提醒我喝水"。
 
         Args:
-        fire_at_str (str): **必填**。触发时间，支持自然语言格式：
-            - "21:30:00" -> 今天21:30（若已过则次日）
-            - "After 1 hour 30 minutes" -> 1小时30分钟后
-            - "2025-12-31 23:59:59" -> 指定日期时间
-
-        session (str): **选填**。会话ID，不填则默认为当前会话。一般无需修改。
-
-        extra_prompt (str): **关键参数，最好填入详细内容**
-            这是触发器触发时，AI 用来生成主动消息的 “话术指令”。
-            请确保该字段能有效传达你的想法与交代的任务。
-            表述清楚需要干什么，可以怎么干 (比如调用需要的 Agent 能力)。
+            fire_at_str(string): 触发时间，支持格式：'HH:MM:SS'(今天，若已过则次日)、'After HH:MM:SS'(相对时间)、'YYYY-MM-DD HH:MM:SS'(绝对时间)
+            session(string): 会话ID，不填则默认为当前会话
+            extra_prompt(string): 触发器触发时 AI 用来生成主动消息的话术指令，请详细描述要说什么、语气风格、是否需要用到 Agent 能力等
+            use_agent(boolean): 是否使用 Agent 能力执行触发器，默认开启
         """
         if not session:
             session = event.unified_msg_origin
@@ -157,9 +141,12 @@ class LLMFunctions:
 
     @llm_tool(name="delete_trigger")
     async def delete_trigger(self, event: AstrMessageEvent, trigger_id: str) -> str:
-        """【主动闲聊插件专用】删除一个【主动闲聊触发器】。
+        """删除一个指定的主动闲聊触发器。
 
-        注意：此操作仅影响临时性的主动闲聊触发器，不影响 `future_task` 创建的持久任务。
+        注意：此操作仅影响临时性的主动闲聊触发器，不影响 future_task 创建的持久任务。
+
+        Args:
+            trigger_id(string): 要删除的触发器 ID，可通过 list_triggers 获取
         """
         async with self._lock:
             if trigger_id in self._triggers:
@@ -177,9 +164,15 @@ class LLMFunctions:
         extra_prompt: Optional[str] = None,
         use_agent: Optional[bool] = None,
     ) -> str:
-        """【主动闲聊插件专用】修改一个已有的【主动闲聊触发器】。
+        """更新一个已有的主动闲聊触发器的属性。
 
-        仅适用于临时性的主动闲聊触发器。如需修改持久任务，请使用 `future_task` 工具。
+        仅适用于临时性的主动闲聊触发器。如需修改持久任务，请使用 future_task 工具。
+
+        Args:
+            trigger_id(string): 要更新的触发器 ID
+            fire_at_unix(number): 新的触发时间戳（Unix 秒），不填则保持不变
+            extra_prompt(string): 新的触发话术指令，不填则保持不变
+            use_agent(boolean): 是否使用 Agent 能力执行，不填则保持不变
         """
         async with self._lock:
             t = self._triggers.get(trigger_id)
@@ -227,4 +220,3 @@ class LLMFunctions:
                 f"agent={use_agent} | 提示词={extra_preview}"
             )
         return "\n".join(lines)
-    
