@@ -11,29 +11,20 @@ from datetime import datetime
 from typing import Optional, Tuple
 
 from astrbot.api import logger
+from astrbot.api.event import MessageChain
+from astrbot.api.message_components import Plain
 
-try:
-    from astrbot.core.cron.events import CronMessageEvent
-    from astrbot.core.astr_main_agent import build_main_agent, MainAgentBuildConfig
-    from astrbot.core.platform.message_session import MessageSession
-    HAS_AGENT_PIPELINE = True
-except ImportError:
-    HAS_AGENT_PIPELINE = False
+from astrbot.core.cron.events import CronMessageEvent
+from astrbot.core.astr_main_agent import build_main_agent, MainAgentBuildConfig
+from astrbot.core.platform.message_session import MessageSession
+from astrbot.core.agent.message import UserMessageSegment, AssistantMessageSegment, TextPart
 
-try:
-    from astrbot.core.agent.message import UserMessageSegment, AssistantMessageSegment, TextPart
-    HAS_NEW_MESSAGE_API = True
-except ImportError:
-    HAS_NEW_MESSAGE_API = False
-
-from time_utils import _get_now_tz, _format_time_delta, calc_sleep_end_unix
-from types import Trigger
+from .time_utils import _get_now_tz, _format_time_delta, calc_sleep_end_unix
+from .data_types import Trigger
 
 
-def build_agent_config(context, umo: str) -> Optional[object]:
-    """构建 MainAgentBuildConfig，避免代码重复"""
-    if not HAS_AGENT_PIPELINE:
-        return None
+def build_agent_config(context, umo: str) -> Optional[MainAgentBuildConfig]:
+    """构建 MainAgentBuildConfig，返回 MainAgentBuildConfig 实例或 None"""
     try:
         astr_conf = context.get_config(umo=umo)
         provider_settings = astr_conf.get("provider_settings", {}) if astr_conf else {}
@@ -60,7 +51,9 @@ def build_agent_config(context, umo: str) -> Optional[object]:
             config_kwargs["llm_compress_keep_recent_ratio"] = provider_settings.get("llm_compress_keep_recent_ratio", 0.15)
         elif "llm_compress_keep_recent" in config_fields:
             config_kwargs["llm_compress_keep_recent"] = provider_settings.get("llm_compress_keep_recent", 4)
-        return MainAgentBuildConfig(**{k: v for k, v in config_kwargs.items() if k in config_fields})
+        # 只传入 config_fields 中存在的键
+        filtered_kwargs = {k: v for k, v in config_kwargs.items() if k in config_fields}
+        return MainAgentBuildConfig(**filtered_kwargs)
     except Exception as e:
         logger.error(f"[LiteInitiative] 构建 AgentConfig 失败: {e}")
         return None
@@ -109,10 +102,6 @@ async def run_ai_decision(
     max_history: int,
 ) -> bool:
     """运行 AI 决策，返回是否成功"""
-    if not HAS_AGENT_PIPELINE:
-        logger.warning("[LiteInitiative] Agent Pipeline 不可用，跳过 AI 决策")
-        return False
-    
     tz = config_reader.get_tz()
     now = _get_now_tz(tz)
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -137,8 +126,8 @@ async def run_ai_decision(
         f"{decision_prompt}\n\n"
         f"要求：\n"
         f"1. 如果需要主动说话，请使用 create_trigger 创建触发器。\n"
-        f"   fire_at_unix 使用 UNIX 时间戳（秒）。\n"
-        f"   extra_prompt 请写明说什么内容、怎么称呼用户、语气风格等。\n"
+        f"   fire_at_str 使用自然语言时间，例如：'21:30:00'（今天21:30，若已过则次日）、'After 1 hour 30 minutes'（1小时30分钟后）、'After 01:30:00'（1小时30分钟后）。\n"
+        f"   extra_prompt 请写明说什么内容、怎么称呼用户、语气风格、有没有需要完成的任务，会不会需要使用以及使用哪些 Agent 能力等。\n"
         f"2. 如果认为不需要主动说话，或者觉得触发器过多/时间冲突，请使用 delete_trigger 或 update_trigger 管理。\n"
         f"3. 睡眠时段 {config_reader.get_sleep_hours()} 内不要创建触发器。\n"
         f"4. 对于非闲聊性质的定时任务（如闹钟、提醒、定时报告），请使用 future_task 函数工具（平台内置），不要用本插件的触发器。"
@@ -158,7 +147,7 @@ async def run_ai_decision(
         config = build_agent_config(context, umo)
         if not config:
             return False
-        
+ 
         result = await build_main_agent(
             event=cron_event,
             plugin_context=context,
@@ -187,9 +176,11 @@ async def run_ai_decision(
 
 async def run_trigger(context, config_reader, trigger: Trigger) -> Tuple[Optional[str], bool]:
     """执行触发器，返回 (回复文本, 是否发送成功)"""
-    if trigger.use_agent and HAS_AGENT_PIPELINE:
+    # 根据 use_agent 选择执行方式
+    if trigger.use_agent:
         return await run_trigger_agent(context, trigger)
-    return await run_trigger_plain(context, trigger)
+    else:
+        return await run_trigger_plain(context, trigger)
 
 
 async def run_trigger_agent(context, trigger: Trigger) -> Tuple[Optional[str], bool]:
@@ -239,8 +230,8 @@ async def run_trigger_plain(context, trigger: Trigger) -> Tuple[Optional[str], b
     try:
         umo = trigger.session or ""
         text = trigger.extra_prompt or "主动来打个招呼吧~"
-        session = MessageSession.from_str(umo)
-        await session.send(text)
+        chain = MessageChain().message(text)
+        await context.send_message(umo, chain)
         return text, True
     except Exception as e:
         logger.error(f"[LiteInitiative] 降级发送失败: {e}")
@@ -250,8 +241,6 @@ async def run_trigger_plain(context, trigger: Trigger) -> Tuple[Optional[str], b
 async def save_proactive_history(context, umo: str, response_text: str):
     """保存主动发言的历史记录"""
     try:
-        if not HAS_NEW_MESSAGE_API:
-            return
         conv_mgr = context.conversation_manager
         if not conv_mgr:
             return

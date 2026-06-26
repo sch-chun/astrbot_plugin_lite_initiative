@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Dict, Optional
+from typing import Dict
 
 from astrbot.api import logger
-from types import Trigger, SessionState
+from .data_types import Trigger, SessionState
 
 
 class Storage:

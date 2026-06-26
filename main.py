@@ -15,12 +15,12 @@ from astrbot.api import logger
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 
-from time_utils import _get_now_tz, _format_time_delta, _is_in_sleep_hours
-from types import Trigger, SessionState
-from config import ConfigReader
-from storage import Storage
-from tools import LLMFunctions
-from decision import run_ai_decision, run_trigger, save_proactive_history, HAS_AGENT_PIPELINE
+from .time_utils import _get_now_tz, _format_time_delta
+from .data_types import Trigger, SessionState
+from .config import ConfigReader
+from .storage import Storage
+from .tools import LLMFunctions
+from .decision import run_ai_decision, run_trigger, save_proactive_history
 
 
 @register(
@@ -71,6 +71,9 @@ class LiteInitiativePlugin(Star):
         self._triggers = self._storage.load_triggers()
         self._sessions, self._last_user_msg = self._storage.load_states()
 
+        # 启动时按会话分别修剪
+        self._enforce_max_triggers()
+
     async def initialize(self):
         self._scheduler_task = asyncio.create_task(self._scheduler_loop())
         logger.info("[LiteInitiative] 插件已激活，调度器已启动")
@@ -93,12 +96,28 @@ class LiteInitiativePlugin(Star):
     # ─────────────────────── 触发器管理 ───────────────────────
 
     def _enforce_max_triggers(self):
+        """按每个会话分别限制触发器数量，超出时删除最早创建的。"""
         max_n = self._config.get_max_triggers()
-        if len(self._triggers) <= max_n:
-            return
-        sorted_t = sorted(self._triggers.values(), key=lambda t: t.created_at)
-        for t in sorted_t[:len(self._triggers) - max_n]:
-            del self._triggers[t.trigger_id]
+        
+        # 按 session 分组
+        sessions = {}
+        for t in self._triggers.values():
+            sessions.setdefault(t.session, []).append(t)
+        
+        to_delete = []
+        for session, triggers in sessions.items():
+            if len(triggers) <= max_n:
+                continue
+            # 按创建时间排序，保留最新的 max_n 个
+            sorted_t = sorted(triggers, key=lambda t: t.created_at)
+            for t in sorted_t[:len(triggers) - max_n]:
+                to_delete.append(t.trigger_id)
+        
+        for tid in to_delete:
+            del self._triggers[tid]
+    
+        if to_delete:
+            self._storage.save_triggers(self._triggers)
 
     def _get_or_create_session(self, umo: str) -> SessionState:
         if umo not in self._sessions:
@@ -113,6 +132,9 @@ class LiteInitiativePlugin(Star):
         if event.get_extra("lite_initiative_proactive"):
             return
         umo = event.unified_msg_origin
+        if not self._is_user_whitelisted(umo):
+            return
+        
         async with self._lock:
             s = self._get_or_create_session(umo)
             s.last_ai_reply_unix = time.time()
@@ -123,14 +145,20 @@ class LiteInitiativePlugin(Star):
             s.timeout_task = asyncio.create_task(self._timeout_decision(umo, timeout_sec))
             logger.debug(f"[LiteInitiative] 超时计时启动: {umo}, {timeout_sec}s")
 
-    @filter.on_message()
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     async def _on_user_message(self, event: AstrMessageEvent):
         """用户发消息：更新活跃时间，清空本会话所有触发器"""
+
         # 只处理私聊
         if event.message_obj.group_id:
             return
 
         umo = event.unified_msg_origin
+
+        # 白名单检查
+        if not self._is_user_whitelisted(umo):
+            return
+        
         async with self._lock:
             self._last_user_msg[umo] = time.time()
             s = self._get_or_create_session(umo)
@@ -159,6 +187,9 @@ class LiteInitiativePlugin(Star):
     # ─────────────────────── 超时决策 ───────────────────────
 
     async def _timeout_decision(self, umo: str, timeout_sec: int):
+        if not self._is_user_whitelisted(umo):
+            return
+        
         try:
             await asyncio.sleep(timeout_sec)
         except asyncio.CancelledError:
@@ -220,6 +251,10 @@ class LiteInitiativePlugin(Star):
         ]
         if not targets:
             return
+        
+        for umo in targets:
+            if not self._is_user_whitelisted(umo):
+                continue
 
         logger.info(f"[LiteInitiative] 每日分析: {len(targets)} 个会话")
         for umo in targets:
@@ -287,6 +322,14 @@ class LiteInitiativePlugin(Star):
         self._firing_ids.add(trigger.trigger_id)
         try:
             umo = trigger.session or ""
+            if not self._is_user_whitelisted(umo):
+
+                # 非白名单用户，直接删除触发器并返回
+                async with self._lock:
+                    if trigger.trigger_id in self._triggers:
+                        del self._triggers[trigger.trigger_id]
+                        self._storage.save_triggers(self._triggers)
+                return
             response_text, sent = await run_trigger(self.context, self._config, trigger)
             if sent and response_text:
                 await save_proactive_history(self.context, umo, response_text)
@@ -364,5 +407,19 @@ class LiteInitiativePlugin(Star):
             f"最大触发器：{self._config.get_max_triggers()}\n"
             f"超时等待：{self._config.get_decision_timeout()}s\n"
             f"每日分析：{', '.join(f'{h}:{m:02d}' for h, m in self._config.get_daily_analysis_times())}\n"
-            f"Agent Pipeline：{'可用' if HAS_AGENT_PIPELINE else '不可用'}"
         )
+
+    def _is_user_whitelisted(self, umo: str) -> bool:
+        """检查 unified_msg_origin 是否在白名单内"""
+        whitelist = self._config.get_whitelist()
+        if not whitelist:
+            return True
+        try:
+            # unified_msg_origin 格式: platform_id:message_type:session_id
+            parts = umo.split(":", 2)
+            if len(parts) == 3:
+                user_id = parts[2]  # 对于私聊，即 QQ 号
+                return user_id in whitelist
+        except Exception:
+            pass
+        return False

@@ -13,16 +13,9 @@ from typing import Optional, Tuple
 
 def _get_now_tz(tz_name: str | None) -> datetime:
     """获取带时区的当前时间"""
-    try:
-        if tz_name:
-            import zoneinfo
-            try:
-                return datetime.now(zoneinfo.ZoneInfo(tz_name))
-            except (zoneinfo.ZoneInfoNotFoundError, ValueError):
-                pass
-    except ImportError:
+    if tz_name:
         try:
-            from backports import zoneinfo
+            import zoneinfo
             return datetime.now(zoneinfo.ZoneInfo(tz_name))
         except Exception:
             pass
@@ -78,39 +71,65 @@ def _format_time_delta(seconds: float) -> str:
 
 
 def _parse_trigger_time(raw: str, now: datetime, tz: Optional[str]) -> Optional[float]:
-    """解析触发时间字符串，返回 UNIX 时间戳"""
+    """
+    解析触发时间字符串，返回 UNIX 时间戳（秒）。
+
+    支持的格式：
+    - 绝对日期时间：YYYY-MM-DD HH:MM:SS 或 YYYY-MM-DD HH:MM
+    - 绝对时间：HH:MM:SS（当天或次日）
+    - 相对时间：After HH:MM:SS（表示 HH 小时 MM 分钟 SS 秒后）
+    - 相对时间：After X hours Y minutes Z seconds（数字和单位，可省略部分）
+    """
     raw = raw.strip()
     if not raw:
         return None
-    
-    # 解析 "X:Y:Z 后" 格式
-    m_rel = re.match(r"^(\d{1,2}:\d{2}:\d{2})\s*后$", raw)
-    if m_rel:
-        secs_parts = m_rel.group(1).split(":")
-        if len(secs_parts) == 3:
-            secs = int(secs_parts[0]) * 3600 + int(secs_parts[1]) * 60 + int(secs_parts[2])
-            return now.timestamp() + secs
-    
-    # 解析绝对时间
-    abs_time = None
-    for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"]:
+
+    # 1. 解析绝对日期时间
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
         try:
-            abs_time = datetime.strptime(raw, fmt)
-            break
+            dt = datetime.strptime(raw, fmt)
+            if tz:
+                import zoneinfo
+                dt = dt.replace(tzinfo=zoneinfo.ZoneInfo(tz))
+            return dt.timestamp()
         except ValueError:
             continue
-    
-    if abs_time:
-        return abs_time.timestamp()
-    
-    # 解析 HH:MM 格式
-    t = _parse_time_str(raw)
-    if t:
-        target = now.replace(hour=t[0], minute=t[1], second=0, microsecond=0)
+
+    # 2. 解析绝对时间 HH:MM:SS（当天，若已过则次日）
+    m = re.match(r"^(\d{1,2}):([0-5]\d):([0-5]\d)$", raw)
+    if m:
+        h, minute, s = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        target = now.replace(hour=h, minute=minute, second=s, microsecond=0)
         if target <= now:
             target = target.replace(day=target.day + 1)
         return target.timestamp()
-    
+
+    # 3. 解析相对时间（After ...）
+    raw_lower = raw.lower()
+    if raw_lower.startswith("after "):
+        # 3.1 After HH:MM:SS
+        m = re.match(r"^after\s+(\d{1,2}):([0-5]\d):([0-5]\d)$", raw_lower)
+        if m:
+            h, minute, s = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            delta = h * 3600 + minute * 60 + s
+            return now.timestamp() + delta
+
+        # 3.2 After X hours Y minutes Z seconds（顺序任意，单位可单复数）
+        hours = minutes = seconds = 0
+        m_h = re.search(r'(\d+)\s*hours?', raw_lower)
+        if m_h:
+            hours = int(m_h.group(1))
+        m_m = re.search(r'(\d+)\s*minutes?', raw_lower)
+        if m_m:
+            minutes = int(m_m.group(1))
+        m_s = re.search(r'(\d+)\s*seconds?', raw_lower)
+        if m_s:
+            seconds = int(m_s.group(1))
+        if hours or minutes or seconds:
+            delta = hours * 3600 + minutes * 60 + seconds
+            return now.timestamp() + delta
+
+    # 无法解析
     return None
 
 
