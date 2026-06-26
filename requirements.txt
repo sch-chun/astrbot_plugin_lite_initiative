@@ -1,0 +1,6 @@
+# LiteInitiative Plugin Dependencies
+# This plugin only uses Python standard library and AstrBot core APIs
+# No additional dependencies required
+
+# AstrBot >= 4.16.0 (managed by AstrBot)
+# Python >= 3.10
