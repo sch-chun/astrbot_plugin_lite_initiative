@@ -154,6 +154,9 @@ class LiteInitiativePlugin(Star):
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     async def _on_user_message(self, event: AstrMessageEvent):
         """用户发消息：更新活跃时间，清空本会话所有触发器"""
+        if not event.message_obj.message and not event.message_str:
+            logger.debug(f"[LiteInitiative] 忽略空消息事件：{event.unified_msg_origin}")
+            return
 
         umo = event.unified_msg_origin
 
