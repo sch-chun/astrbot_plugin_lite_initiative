@@ -20,8 +20,21 @@
   "max_triggers": {
     "type": "int",
     "description": "单个会话最大触发器个数",
-    "hint": "若值被减小，超出时最早创建的触发器会被丢弃",
+    "hint": "若该值被减小到当前触发器数量以下，最早创建的触发器会被丢弃",
     "default": 5
+  },
+    "decision_timeout_seconds": {
+    "type": "int",
+    "description": "AI 回复后等待用户回复的超时时间（秒）",
+    "hint": "超时后触发决策",
+    "default": 300
+  },
+  "decision_provider": {
+    "type": "string",
+    "description": "决策阶段使用的模型提供商 ID",
+    "hint": "决策包括超时决策和每日分析，留空则使用主代理默认模型",
+    "_special": "select_provider",
+    "default": ""
   },
   "decision_prompt": {
     "type": "text",
@@ -29,16 +42,23 @@
     "hint": "用于告诉 AI 如何判断是否创建触发器",
     "default": "你是一个主动闲聊决策助手。根据当前对话上下文和用户沉默时间，判断是否需要在未来某个时间点主动发起聊天。如果决定发起，请使用本插件的触发器管理工具创建触发器。\n重要：本插件的 create_trigger 仅用于创建会被用户消息清空的临时闲聊触发器。\n如需创建持久定时任务（闹钟、提醒等），必须使用系统内置的 future_task 工具。\n请务必根据任务性质选择正确的工具。"
   },
-  "decision_max_history_messages": {
+    "min_trigger_delay": {
     "type": "int",
-    "description": "超时决策时提供给 AI 的最大历史消息条数",
-    "default": 20
+    "description": "最小触发器延迟秒数",
+    "hint": "强制 AI 在短时间主动时使用 send_message_to_user 直接发送，避免因触发器执行而增加一次 LLM 调用（当决策和回复共用昂贵模型时尤其有用）",
+    "default": 0
   },
-  "decision_timeout_seconds": {
-    "type": "int",
-    "description": "AI 回复后等待用户回复的超时时间（秒）",
-    "hint": "超时后触发决策",
-    "default": 300
+  "suggest_direct_send": {
+    "type": "bool",
+    "description": "是否建议短延迟直接发送",
+    "hint": "在决策提示词中明确建议 AI 在需短时间内（例如 5 分钟内）发送主动消息时使用 send_message_to_user，减少不必要的触发器创建",
+    "default": true
+  },
+  "suggest_direct_send_prompt": {
+    "type": "text",
+    "description": "建议直接发送的提示词",
+    "hint": "仅在 ‘是否建议短延迟直接发送’ 开启时有效",
+    "default": "如果需要立即发送主动消息，或在短时间内（例如 5 分钟以内）主动发送，请直接使用 `send_message_to_user` 工具发送，无需创建触发器，这样可以避免一次额外的模型调用。对于更长时间的延迟或需要等待合适时机，则可以使用 `create_trigger` 创建触发器。"
   },
   "daily_analysis_times": {
     "type": "string",
@@ -49,12 +69,7 @@
   "daily_analysis_prompt": {
     "type": "text",
     "description": "每日分析 AI 的系统提示词",
-    "default": "你是一个对话分析助手。分析最近的历史对话，判断是否需要在未来主动发起闲聊。如果认为合适，使用触发器管理工具创建触发器，指定合适的触发时间、额外提示词等。"
-  },
-  "daily_analysis_max_history_messages": {
-    "type": "int",
-    "description": "每日分析时提供给 AI 的最大历史消息条数",
-    "default": 50
+    "default": "你是一个对话分析助手。分析最近的历史对话，判断是否需要在未来主动发起闲聊。如果认为合适，使用触发器管理工具创建触发器，指定合适的触发时间、额外提示词等。如果决定发起，请使用本插件的触发器管理工具创建触发器。\n重要：本插件的 create_trigger 仅用于创建会被用户消息清空的临时闲聊触发器。\n如需创建持久定时任务（闹钟、提醒等），必须使用系统内置的 future_task 工具。\n请务必根据任务性质选择正确的工具。"
   },
   "inactive_threshold_hours": {
     "type": "int",

@@ -63,7 +63,13 @@ class Storage:
             last_user_msg = {}
             for k, v in data.items():
                 if k == "last_user_msg_unix":
-                    last_user_msg = v if isinstance(v, dict) else {}
+
+                    # 过滤无效的 UMO
+                    if isinstance(v, dict):
+                        last_user_msg = {
+                            key: val for key, val in v.items()
+                            if isinstance(key, str) and key.count(":") >= 2
+                        }
                 else:
                     sessions[k] = SessionState.from_dict(v)
             logger.info(f"[LiteInitiative] 加载了 {len(sessions)} 个会话状态")

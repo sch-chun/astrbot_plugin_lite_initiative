@@ -63,31 +63,25 @@ class LiteInitiativePlugin(Star):
         self._enforce_max_triggers()
 
     async def initialize(self):
-        # 注册 LLM 工具（必须在异步方法中进行）
-        try:
-            from . import tools as tools_module
-            tools_module._plugin = self  # 设置模块级插件引用
 
-            # 注册工具函数
-            import astrbot.api as api_module
-            for func_name in ["list_triggers", "create_trigger", "delete_trigger", "update_trigger"]:
-                func = getattr(tools_module, func_name)
-                await api_module.register_llm_tool(func)
+        # 注册 LLM 工具（类方式）
+        from . import tools
 
-            # 激活工具
-            for tool_name in ["list_triggers", "create_trigger", "delete_trigger", "update_trigger"]:
-                self.context.activate_llm_tool(tool_name)
-            
-            # 手动设置 handler_module_path（AstrBot 的 spec_to_func 没有自动设置）
-            llm_tools = self.context.provider_manager.llm_tools
-            for func_tool in llm_tools.func_list:
-                if func_tool.name in ["list_triggers", "create_trigger", "delete_trigger", "update_trigger"]:
-                    func_tool.handler_module_path = self.__class__.__module__
-            
-            logger.info("[LiteInitiative] LLM 工具注册成功")
-        except Exception as e:
-            logger.warning(f"[LiteInitiative] LLM 工具注册失败: {e}")
-
+        # 设置模块级插件引用（便于辅助函数使用）
+        tools._plugin = self
+        
+        # 创建工具实例，传入 self 以便工具内调用插件方法
+        list_tool = tools.ListTriggersTool(plugin=self)
+        create_tool = tools.CreateTriggerTool(plugin=self)
+        delete_tool = tools.DeleteTriggerTool(plugin=self)
+        update_tool = tools.UpdateTriggerTool(plugin=self)
+        
+        # 注册到 AstrBot
+        self.context.add_llm_tools(list_tool, create_tool, delete_tool, update_tool)
+        
+        logger.info("[LiteInitiative] LLM 工具注册成功（类方式）")
+        
+        # 启动调度器
         self._scheduler_task = asyncio.create_task(self._scheduler_loop())
         logger.info("[LiteInitiative] 插件已激活，调度器已启动")
 
@@ -142,7 +136,7 @@ class LiteInitiativePlugin(Star):
     @filter.on_llm_response()
     async def _on_llm_response(self, event: AstrMessageEvent, _response=None):
         """AI 回复后启动超时计时"""
-        if event.get_extra("lite_initiative_proactive"):
+        if event.get_extra("lite_initiative_proactive") or event.get_extra("lite_initiative_decision"):
             return
         umo = event.unified_msg_origin
         if not self._is_user_whitelisted(umo):
@@ -160,7 +154,7 @@ class LiteInitiativePlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     async def _on_user_message(self, event: AstrMessageEvent):
-        """用户发消息：更新活跃时间，清空本会话所有触发器"""
+        """用户发消息：更新活跃时间，清空超时时间内所有触发器"""
         if not event.message_obj.message and not event.message_str:
             logger.debug(f"[LiteInitiative] 忽略空消息事件：{event.unified_msg_origin}")
             return
@@ -187,21 +181,73 @@ class LiteInitiativePlugin(Star):
                 s.decision_in_progress = False
                 logger.debug(f"[LiteInitiative] 用户发消息，中断决策: {umo}")
 
-            # 清空本会话所有触发器
-            to_remove = [tid for tid, t in self._triggers.items() if t.session == umo]
+            # 只清空本会话中即将触发（在超时时间内）的触发器
+            timeout_sec = self._config.get_decision_timeout()
+            now_ts = time.time()
+            cutoff = now_ts + timeout_sec
+            to_remove = [
+                tid for tid, t in self._triggers.items()
+                if t.session == umo and t.fire_at_unix <= cutoff
+            ]
             for tid in to_remove:
                 del self._triggers[tid]
-                logger.debug(f"[LiteInitiative] 清空触发器: {tid}")
-
+                logger.debug(f"[LiteInitiative] 清空即将触发的触发器: {tid}")
+                
             if to_remove:
                 self._storage.save_triggers(self._triggers)
+
+    # ——————————————————————— 决策方法 ———————————————————————
+
+    async def _perform_decision(self, umo: str, is_daily: bool = False) -> None:
+        """执行决策核心逻辑（供调度和debug复用）"""
+        if not self._is_user_whitelisted(umo):
+            return
+
+        async with self._lock:
+            s = self._get_or_create_session(umo)
+            # 防重入
+            if s.decision_in_progress:
+                return
+            s.decision_in_progress = True
+
+        now_ts = time.time()
+        # 计算沉默时间
+        last_active = max(s.last_user_msg_unix or 0, s.last_ai_reply_unix or 0)
+        silence_sec = now_ts - last_active
+
+        # 对于每日分析，额外检查用户活跃阈值（仅当 is_daily=True 时）
+        if is_daily:
+            inactive_h = self._config.get_inactive_threshold_hours()
+            if inactive_h > 0 and silence_sec >= inactive_h * 3600:
+                # 用户已长时间不活跃，跳过分析
+                async with self._lock:
+                    s.decision_in_progress = False
+                return
+
+        logger.info(f"[LiteInitiative] 执行决策({umo}), 沉默 {_format_time_delta(silence_sec)}, 类型={'每日' if is_daily else '超时'}")
+
+        trigger_list = self._list_for_session(umo)
+        prompt = self._config.get_daily_analysis_prompt() if is_daily else self._config.get_decision_prompt()
+
+        try:
+            await run_ai_decision(
+                context=self.context,
+                config_reader=self._config,
+                umo=umo,
+                trigger_list=trigger_list,
+                silence_sec=silence_sec,
+                decision_prompt=prompt
+            )
+        except Exception as e:
+            logger.error(f"[LiteInitiative] 决策失败({umo}): {e}", exc_info=True)
+        finally:
+            async with self._lock:
+                if umo in self._sessions:
+                    self._sessions[umo].decision_in_progress = False
 
     # ─────────────────────── 超时决策 ───────────────────────
 
     async def _timeout_decision(self, umo: str, timeout_sec: int):
-        if not self._is_user_whitelisted(umo):
-            return
-        
         try:
             await asyncio.sleep(timeout_sec)
         except asyncio.CancelledError:
@@ -211,36 +257,15 @@ class LiteInitiativePlugin(Star):
             s = self._sessions.get(umo)
             if not s:
                 return
+            
             # 检查用户是否在超时期间发过消息
             if s.last_user_msg_unix > s.last_ai_reply_unix:
                 return
-            # 防重入
             if s.decision_in_progress:
                 return
-            s.decision_in_progress = True
-
-        now_ts = time.time()
-        last_active = max(s.last_user_msg_unix or 0, s.last_ai_reply_unix or 0)
-        silence_sec = now_ts - last_active
-        logger.info(f"[LiteInitiative] 超时决策触发: {umo}, 沉默 {_format_time_delta(silence_sec)}")
-
-        try:
-            trigger_list = self._list_for_session(umo)
-            await run_ai_decision(
-                context=self.context,
-                config_reader=self._config,
-                umo=umo,
-                trigger_list=trigger_list,
-                silence_sec=silence_sec,
-                decision_prompt=self._config.get_decision_prompt(),
-                max_history=self._config.get_decision_max_history(),
-            )
-        except Exception as e:
-            logger.error(f"[LiteInitiative] 超时决策异常({umo}): {e}", exc_info=True)
-        finally:
-            async with self._lock:
-                if umo in self._sessions:
-                    self._sessions[umo].decision_in_progress = False
+            
+        # 调用核心方法（is_daily=False）
+        await self._perform_decision(umo, is_daily=False)
 
     # ─────────────────────── 每日分析 ───────────────────────
 
@@ -255,32 +280,20 @@ class LiteInitiativePlugin(Star):
             return
         self._last_daily_minute = minute_key
 
+        # 获取所有活跃会话（已过滤白名单）
         now_ts = time.time()
         inactive_h = self._config.get_inactive_threshold_hours()
         targets = [
             umo for umo, last in self._last_user_msg.items()
             if inactive_h <= 0 or (now_ts - last) < inactive_h * 3600
         ]
-        # 过滤白名单
         targets = [umo for umo in targets if self._is_user_whitelisted(umo)]
         if not targets:
             return
 
         logger.info(f"[LiteInitiative] 每日分析: {len(targets)} 个会话")
         for umo in targets:
-            try:
-                trigger_list = self._list_for_session(umo)
-                await run_ai_decision(
-                    context=self.context,
-                    config_reader=self._config,
-                    umo=umo,
-                    trigger_list=trigger_list,
-                    silence_sec=now_ts - self._last_user_msg.get(umo, now_ts),
-                    decision_prompt=self._config.get_daily_analysis_prompt(),
-                    max_history=self._config.get_daily_analysis_max_history(),
-                )
-            except Exception as e:
-                logger.error(f"[LiteInitiative] 每日分析失败({umo}): {e}")
+            await self._perform_decision(umo, is_daily=True)
 
     def _list_for_session(self, session: str = "") -> list:
         tlist = []
@@ -433,3 +446,26 @@ class LiteInitiativePlugin(Star):
         except Exception:
             pass
         return False
+    
+    @filter.command("li_debug_timeout")
+    async def _cmd_debug_timeout(self, event: AstrMessageEvent):
+        """手动触发超时决策（调试用）"""
+        umo = event.unified_msg_origin
+        if not self._is_user_whitelisted(umo):
+            yield event.plain_result("❌ 您不在白名单中。")
+            return
+        # 直接调用核心方法（不等待）
+        await self._perform_decision(umo, is_daily=False)
+        yield event.plain_result("✅ 已手动触发超时决策，请查看日志。")
+
+    @filter.command("li_debug_daily")
+    async def _cmd_debug_daily(self, event: AstrMessageEvent):
+        """手动触发每日分析（调试用）"""
+        umo = event.unified_msg_origin
+        if not self._is_user_whitelisted(umo):
+            yield event.plain_result("❌ 您不在白名单中。")
+            return
+        # 直接调用核心方法（强制每日分析）
+        await self._perform_decision(umo, is_daily=True)
+        yield event.plain_result("✅ 已手动触发每日分析，请查看日志。")
+        

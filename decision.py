@@ -59,39 +59,6 @@ def build_agent_config(context, umo: str) -> Optional[MainAgentBuildConfig]:
         return None
 
 
-async def get_history_text(context, umo: str, max_messages: int) -> str:
-    """获取会话历史消息文本"""
-    try:
-        conv_mgr = context.conversation_manager
-        if not conv_mgr:
-            return ""
-        curr_cid = await conv_mgr.get_curr_conversation_id(umo)
-        if not curr_cid:
-            return ""
-        conv = await conv_mgr.get_conversation(umo, curr_cid)
-        if not conv:
-            return ""
-        messages = getattr(conv, "messages", []) or []
-        lines = []
-        for msg in messages[-max_messages:]:
-            role = getattr(msg, "role", "unknown")
-            content_parts = getattr(msg, "content", []) or []
-            text_parts = []
-            for part in content_parts:
-                if hasattr(part, "text"):
-                    text_parts.append(part.text)
-                elif isinstance(part, str):
-                    text_parts.append(part)
-            text = "".join(text_parts).strip()
-            if text:
-                role_str = "用户" if role == "user" else "AI"
-                lines.append(f"{role_str}: {text}")
-        return "\n".join(lines)
-    except Exception as e:
-        logger.warning(f"[LiteInitiative] 获取历史消息失败: {e}")
-        return ""
-
-
 async def run_ai_decision(
     context,
     config_reader,
@@ -99,14 +66,16 @@ async def run_ai_decision(
     trigger_list: list,
     silence_sec: float,
     decision_prompt: str,
-    max_history: int,
 ) -> bool:
     """运行 AI 决策，返回是否成功"""
+    if umo.count(":") < 2:
+        logger.error(f"[LiteInitiative] 无效的 UMO：{umo}，跳过决策")
+        return False
+    
+    # 构建动态提示
     tz = config_reader.get_tz()
     now = _get_now_tz(tz)
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-    
-    history_text = await get_history_text(context, umo, max_history)
     
     date_tip = ""
     if config_reader.get_inject_date_tip():
@@ -116,11 +85,34 @@ async def run_ai_decision(
             f"沉默时长: {_format_time_delta(silence_sec)}\n"
             f"会话 ID: {umo}\n"
         )
+
+    suggest_direct_send = config_reader.get_suggest_direct_send()
+    suggest_prompt = ""
+    if suggest_direct_send:
+        suggest_prompt = config_reader.get_suggest_direct_send_prompt()
+        if not suggest_prompt:
+            logger.warning("[LiteInitiative] 未设置直接发送建议提示词，将使用默认提示词")
+
+            # 若未自定义，使用默认
+            suggest_prompt = (
+                "如果需要立即发送主动消息，或在短时间内（例如 5 分钟以内）主动发送，"
+                "请直接使用 `send_message_to_user` 工具发送，无需创建触发器，"
+                "这样可以避免一次额外的模型调用。对于更长时间的延迟或需要等待合适时机，"
+                "则可以使用 `create_trigger` 创建触发器。"
+            )
+
+    # 最小延迟提示（强制限制）
+    min_delay = config_reader.get_min_trigger_delay()
+    delay_tip = ""
+    if min_delay > 0:
+        delay_tip = (
+            f"⚠️ 硬性限制：触发器必须至少延迟 {min_delay} 秒才能创建。"
+            f"若需在 {min_delay} 秒内主动发言，请务必使用 `send_message_to_user` 工具，"
+            f"试图创建短时触发器将被拒绝。\n"
+        )
     
     full_prompt = (
         f"{date_tip}\n"
-        f"历史对话（最近消息）：\n"
-        f"{history_text if history_text else '(无历史消息)'}\n\n"
         f"当前触发器队列：\n"
         f"{json.dumps(trigger_list, ensure_ascii=False, indent=2) if trigger_list else '(无)'}\n\n"
         f"{decision_prompt}\n\n"
@@ -129,10 +121,11 @@ async def run_ai_decision(
         f"   fire_at_str 使用自然语言时间，例如：'21:30:00'（今天21:30，若已过则次日）、'After 1 hour 30 minutes'（1小时30分钟后）、'After 01:30:00'（1小时30分钟后）。\n"
         f"   extra_prompt 请写明说什么内容、怎么称呼用户、语气风格、有没有需要完成的任务，会不会需要使用以及使用哪些 Agent 能力等。\n"
         f"2. 如果认为不需要主动说话，或者觉得触发器过多/时间冲突，请使用 delete_trigger 或 update_trigger 管理。\n"
-        f"3. 睡眠时段 {config_reader.get_sleep_hours()} 内不要创建触发器。\n"
+        f"3. 睡眠时段 {config_reader.get_sleep_hours()} 内禁止创建触发器，create_trigger 将拒绝创建。\n"
         f"4. 对于非闲聊性质的定时任务（如闹钟、提醒、定时报告），请使用 future_task 函数工具（平台内置），不要用本插件的触发器。"
         f"future_task 创建的定时任务不会被用户消息清空。\n"
-        f"5. 用户刚刚发过消息后不要立即创建触发器，至少等待一段时间。"
+        f"5. {suggest_prompt}\n"
+        f"{delay_tip}"
     )
     
     try:
@@ -147,14 +140,25 @@ async def run_ai_decision(
         config = build_agent_config(context, umo)
         if not config:
             return False
+        
+        # 获取决策专用 provider（如有）
+        decision_provider_id = config_reader.get_decision_provider()
+        provider = None
+        if decision_provider_id:
+            try:
+                provider = context.provider_manager.get_provider(decision_provider_id)
+                if provider is None:
+                    logger.info(f"[LiteInitiative] 未找到提供商 '{decision_provider_id}'，将使用默认模型。")
+            except Exception as e:
+                logger.warning(f"[LiteInitiative] 获取提供商失败: {e}，使用默认模型。")
  
         result = await build_main_agent(
             event=cron_event,
             plugin_context=context,
             config=config,
-            provider=None,
+            provider=provider,
             req=None,
-            apply_reset=True,   # ← 修复！apply_reset=True 确保 agent_runner 初始化 _state
+            apply_reset=True,
         )
         
         if not result or not result.agent_runner:
@@ -175,9 +179,8 @@ async def run_ai_decision(
 
 
 async def run_trigger(context, config_reader, trigger: Trigger) -> Tuple[Optional[str], bool]:
-    """执行触发器，返回 (回复文本, 是否发送成功)"""
-    # 根据 use_agent 选择执行方式
-    if trigger.use_agent:
+    """执行 direct_send 触发器，返回 (回复文本, 是否发送成功)"""
+    if trigger.direct_send:
         return await run_trigger_agent(context, trigger)
     else:
         return await run_trigger_plain(context, trigger)
@@ -205,7 +208,7 @@ async def run_trigger_agent(context, trigger: Trigger) -> Tuple[Optional[str], b
             config=config,
             provider=None,
             req=None,
-            apply_reset=True,   # ← 同样修复 run_trigger_agent
+            apply_reset=True,
         )
         
         if not result or not result.agent_runner:
@@ -216,10 +219,13 @@ async def run_trigger_agent(context, trigger: Trigger) -> Tuple[Optional[str], b
             pass
         
         llm_resp = runner.get_final_llm_resp()
-        sent = getattr(cron_event, "_has_send_oper", False)
         if llm_resp and llm_resp.completion_text:
-            return llm_resp.completion_text.strip(), sent
-        return None, sent
+            text = llm_resp.completion_text.strip()
+            chain = MessageChain().message(text)
+            logger.info(f"[LiteInitiative] 准备发送主动消息到{umo}")
+            await context.send_message(umo, chain)
+            return text, True
+        return None, False
     except Exception as e:
         logger.error(f"[LiteInitiative] Agent 执行失败: {e}", exc_info=True)
         return None, False

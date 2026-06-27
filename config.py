@@ -31,9 +31,6 @@ class ConfigReader:
     def get_decision_prompt(self) -> str:
         return self.cfg.get("decision_prompt", "你是一个主动闲聊决策助手。")
     
-    def get_decision_max_history(self) -> int:
-        return int(self.cfg.get("decision_max_history_messages", 20))
-    
     def get_daily_analysis_times(self):
         raw = self.cfg.get("daily_analysis_times", "09:00,14:00,21:00")
         result = []
@@ -47,9 +44,6 @@ class ConfigReader:
     def get_daily_analysis_prompt(self) -> str:
         return self.cfg.get("daily_analysis_prompt", "你是一个对话分析助手。")
     
-    def get_daily_analysis_max_history(self) -> int:
-        return int(self.cfg.get("daily_analysis_max_history_messages", 50))
-    
     def get_inactive_threshold_hours(self) -> int:
         return int(self.cfg.get("inactive_threshold_hours", 24))
     
@@ -62,4 +56,16 @@ class ConfigReader:
     def get_whitelist(self) -> list:
         """获取白名单 ID 列表，返回 list"""
         return self.cfg.get("whitelist", []) or []
-        
+    
+    def get_decision_provider(self) -> Optional[str]:
+        """获取决策阶段使用的模型提供商 ID，若未配置则返回 None"""
+        return self.cfg.get("decision_provider") or None
+
+    def get_min_trigger_delay(self) -> int:
+        return int(self.cfg.get("min_trigger_delay", 0))
+    
+    def get_suggest_direct_send(self) -> bool:
+        return bool(self.cfg.get("suggest_direct_send_prompt", True))
+    
+    def get_suggest_direct_send_prompt(self) -> str:
+        return self.cfg.get("suggest_direct_send_prompt", "")

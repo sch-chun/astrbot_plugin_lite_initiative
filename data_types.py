@@ -19,7 +19,7 @@ class Trigger:
     fire_at_unix: float = 0.0
     session: str = ""
     extra_prompt: str = ""
-    use_agent: bool = True
+    direct_send: bool = True
     created_at: float = field(default_factory=time.time)
     extra: Dict[str, Any] = field(default_factory=dict)
 
@@ -29,7 +29,7 @@ class Trigger:
             "fire_at_unix": self.fire_at_unix,
             "session": self.session,
             "extra_prompt": self.extra_prompt,
-            "use_agent": self.use_agent,
+            "direct_send": self.direct_send,
             "created_at": self.created_at,
             "extra": self.extra,
         }
@@ -40,6 +40,11 @@ class Trigger:
         for k, v in data.items():
             if hasattr(t, k):
                 setattr(t, k, v)
+                
+        # 兼容旧数据：若没有 direct_send 字段，设置默认 False
+        if not hasattr(t, "direct_send") or t.direct_send is None:
+            t.direct_send = False
+
         # 兼容旧数据：丢弃 source 字段
         return t
 

@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-06-28
+
+### Added
+
+- **决策专用模型提供商**：新增配置项 `decision_provider`，可为超时决策和每日分析指定独立的 LLM 提供商，留空则使用主代理默认模型
+- **最小触发器延迟**：新增 `min_trigger_delay` 配置，强制 AI 在短时间主动时使用 `send_message_to_user` 直接发送，避免额外 LLM 调用（对昂贵模型尤其有用）
+- **短延迟直接发送建议**：新增 `suggest_direct_send` 和 `suggest_direct_send_prompt` 配置，决策时提示 AI 在需短时间内发送主动消息时直接发送，减少触发器创建
+- **调试命令**：新增 `/li_debug_timeout` 和 `/li_debug_daily`，便于手动触发决策进行测试
+
+### Changed
+
+- **决策流程重构**：
+  - 统一 `_perform_decision` 核心方法，超时决策和每日分析共用同一逻辑，消除代码重复
+  - 决策时不再手动获取历史消息，依赖 AstrBot 上下文自动传递，减少耦合
+  - 支持决策专用 provider，自动降级至默认模型
+- **触发器字段重命名**：`use_agent` 改为 `direct_send`，语义更明确（`True`=直接发送原文，`False`=走 Agent 能力生成内容）
+- **用户消息清空策略优化**：用户发送新消息时，仅清空本会话中**即将触发**（在超时窗口内）的触发器，而非全部清空，避免误删远期触发器
+- **工具注册方式升级**：从 `@llm_tool` 函数装饰器迁移至 `FunctionTool` 类方式，符合 AstrBot 4.x 新规范，工具内部直接持有插件实例，提升类型安全性和可维护性
+- **存储健壮性**：加载会话状态时过滤无效的 `unified_msg_origin`，避免脏数据污染
+
+### Removed
+
+- 移除 `decision_max_history_messages` 和 `daily_analysis_max_history_messages` 配置（历史消息由 AstrBot 上下文管理，无需插件单独控制）
+
+### Fixed
+
+- 修复决策过程中可能因无效 UMO 导致的崩溃
+- 修复旧版本触发器数据中缺少 `direct_send` 字段时的兼容性问题（自动设为 `False`）
+- 修复每日分析时未正确检查用户不活跃阈值的问题
+
 ## [0.1.0] - 2026-06-26
 
 ### Added
