@@ -144,7 +144,7 @@ async def run_ai_decision(
         provider = None
         if decision_provider_id:
             try:
-                provider = context.provider_manager.get_provider(decision_provider_id)
+                provider = context.provider_manager.get_provider_by_id(decision_provider_id)
                 if provider is None:
                     logger.info(f"[LiteInitiative] 未找到提供商 '{decision_provider_id}'，将使用默认模型。")
             except Exception as e:
