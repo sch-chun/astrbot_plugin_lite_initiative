@@ -3,10 +3,11 @@
 """
 LiteInitiative - LLM 工具模块
 
-⚠️ 重要：@llm_tool 装饰的函数不能是类方法！
-AstrBot 的 tool executor 以 handler(event, **kwargs) 的方式调用工具，
-如果函数是类方法（有 self 参数），event 会被错误地当作 self 传入。
-所以所有工具函数都必须是独立函数，通过闭包持有 plugin 引用。
+⚠️ 重要约定：
+所有 @llm_tool 装饰的函数都是独立函数（非类方法），因为 AstrBot 的
+tool executor 以 handler(event, **kwargs) 方式调用，不支持 self 绑定。
+
+插件实例引用存放在模块级 _plugin 变量中，由 main.py 的 initialize() 设置。
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from typing import List, Optional
 from astrbot.api import llm_tool
 from astrbot.api.event import AstrMessageEvent
 
-# 模块级插件引用（在 LLMFunctions.__init__ 中设置）
+# 模块级插件引用（由 main.py 的 initialize() 设置）
 _plugin = None
 
 
@@ -57,7 +58,7 @@ def _check_sleep(fire_at_unix: float) -> bool:
 
 def _format_trigger_list(session: str) -> str:
     """格式化指定会话的触发器列表"""
-    from .time_utils import _get_now_tz, _format_time_delta
+    from .time_utils import _format_time_delta
     tlist = _list_for_session(session)
     if not tlist:
         return "当前没有待执行的触发器。"
@@ -87,7 +88,7 @@ def _format_trigger_list(session: str) -> str:
     return "\n".join(lines)
 
 
-# ═══════════════════════ 独立的 @llm_tool 函数 ═══════════════════════
+# ═══════════════════════ LLM 函数工具 ═══════════════════════
 
 @llm_tool(name="list_triggers")
 async def list_triggers(event: AstrMessageEvent, session: str = "") -> str:
@@ -132,39 +133,28 @@ async def create_trigger(
     if not session:
         session = event.unified_msg_origin
 
-    # 获取当前时间和时区
     tz = _config().get_tz()
     now = _get_now_tz(tz)
-    
-    # 解析时间字符串
+
     fire_at_unix = _parse_trigger_time(fire_at_str, now, tz)
     if fire_at_unix is None:
-        return f"❌ 创建失败：无法解析时间字符串 '{fire_at_str}'。请使用 'HH:MM:SS'、'YYYY-MM-DD HH:MM:SS'、'After HH:MM:SS' 或 'After X hours Y minutes Z seconds' 格式。"
+        return f"❌ 创建失败：无法解析时间字符串 '{fire_at_str}'。"
 
-    # 检查是否在睡眠时段
     if _check_sleep(fire_at_unix):
         sleep_end = calc_sleep_end_unix(_config().get_sleep_hours(), tz)
-        if sleep_end and sleep_end < fire_at_unix:
-            pass  # 已过睡眠结束时间，可以
-        else:
-            return f"❌ 创建失败：触发时间落在睡眠时段内（{_config().get_sleep_hours()}），请选择其他时间。"
+        if not (sleep_end and sleep_end < fire_at_unix):
+            return f"❌ 创建失败：触发时间在睡眠时段内（{_config().get_sleep_hours()}）。"
 
     async with _lock():
-
-        # 上限检查
         max_n = _config().get_max_triggers()
-
-        # 获取当前会话触发器列表
         session_triggers = _list_for_session(session)
         if len(session_triggers) >= max_n:
-            list_output = _format_trigger_list(session)
-            
-            # 格式化
             return (
-                f"❌ 创建失败：当前会话已达到触发器上限（{max_n} 个）。\n\n"
-                f"{list_output}\n\n"
-                f"💡 请先使用 `delete_trigger` 删除不需要的旧触发器，然后重试创建。"
+                f"❌ 创建失败：当前会话已达上限（{max_n} 个）。\n\n"
+                f"{_format_trigger_list(session)}\n\n"
+                f"💡 请先删除旧触发器再重试。"
             )
+
         t = Trigger(
             fire_at_unix=fire_at_unix,
             session=session,
@@ -176,8 +166,7 @@ async def create_trigger(
         _storage().save_triggers(_triggers())
 
     fire_dt = datetime.fromtimestamp(fire_at_unix)
-    fire_str = fire_dt.strftime("%Y-%m-%d %H:%M:%S")
-    return f"✅ 触发器已创建：ID={t.trigger_id}，触发时间={fire_str}，会话={session}"
+    return f"✅ 触发器已创建：ID={t.trigger_id}，时间={fire_dt.strftime('%Y-%m-%d %H:%M:%S')}，会话={session}"
 
 
 @llm_tool(name="delete_trigger")
@@ -193,8 +182,8 @@ async def delete_trigger(event: AstrMessageEvent, trigger_id: str) -> str:
         if trigger_id in _triggers():
             del _triggers()[trigger_id]
             _storage().save_triggers(_triggers())
-            return f"✅ 触发器 {trigger_id} 已成功删除。"
-    return f"❌ 未找到触发器 {trigger_id}，请使用 list_triggers 确认 ID。"
+            return f"✅ 触发器 {trigger_id} 已删除。"
+    return f"❌ 未找到触发器 {trigger_id}。"
 
 
 @llm_tool(name="update_trigger")
@@ -218,10 +207,10 @@ async def update_trigger(
     async with _lock():
         t = _triggers().get(trigger_id)
         if not t:
-            return f"❌ 更新失败：未找到触发器 {trigger_id}"
+            return f"❌ 未找到触发器 {trigger_id}"
         if fire_at_unix is not None:
             if _check_sleep(fire_at_unix):
-                return "❌ 更新失败：新触发时间在睡眠时段内。"
+                return "❌ 新触发时间在睡眠时段内。"
             t.fire_at_unix = fire_at_unix
         if extra_prompt is not None:
             t.extra_prompt = extra_prompt
@@ -230,31 +219,4 @@ async def update_trigger(
         _storage().save_triggers(_triggers())
 
     fire_str = datetime.fromtimestamp(t.fire_at_unix).strftime("%Y-%m-%d %H:%M:%S")
-    return f"✅ 触发器 {trigger_id} 已更新：触发时间={fire_str}，agent={t.use_agent}，提示词长度={len(t.extra_prompt)}"
-
-
-# ═══════════════════════ 注册辅助 ═══════════════════════
-
-class LLMFunctions:
-    """
-    LLM 函数工具集 - 用于注册独立函数到 AstrBot 工具管理器。
-
-    ⚠️ 工具函数已改为模块级独立函数，不再绑在类方法上。
-    这是为了兼容 AstrBot tool executor 的调用方式：handler(event, **kwargs)
-    """
-
-    def __init__(self, plugin):
-        global _plugin
-        _plugin = plugin
-
-        # 注册所有工具函数
-        self._register_tool("list_triggers")
-        self._register_tool("create_trigger")
-        self._register_tool("delete_trigger")
-        self._register_tool("update_trigger")
-
-    def _register_tool(self, func_name: str):
-        """将模块级工具函数注册到 AstrBot"""
-        import astrbot.api as api_module
-        func = globals()[func_name]
-        api_module.register_llm_tool(func)
+    return f"✅ 触发器 {trigger_id} 已更新：时间={fire_str}，agent={t.use_agent}"
