@@ -19,7 +19,6 @@ from .time_utils import _get_now_tz, _format_time_delta
 from .data_types import Trigger, SessionState
 from .config import ConfigReader
 from .storage import Storage
-from .tools import LLMFunctions
 from .decision import run_ai_decision, run_trigger, save_proactive_history
 
 
@@ -47,23 +46,6 @@ class LiteInitiativePlugin(Star):
         self._storage = self._init_storage()
         self._load_all()
 
-        # 注册 LLM 工具
-        self._llm_funcs = LLMFunctions(self)
-        try:
-            # 激活工具
-            for tool_name in ["list_triggers", "create_trigger", "delete_trigger", "update_trigger"]:
-                self.context.activate_llm_tool(tool_name)
-            
-            # 手动设置 handler_module_path（AstrBot 的 spec_to_func 没有自动设置）
-            llm_tools = self.context.provider_manager.llm_tools
-            for func_tool in llm_tools.func_list:
-                if func_tool.name in ["list_triggers", "create_trigger", "delete_trigger", "update_trigger"]:
-                    func_tool.handler_module_path = self.__class__.__module__
-            
-            logger.info("[LiteInitiative] LLM 工具注册成功")
-        except Exception as e:
-            logger.warning(f"[LiteInitiative] LLM 工具注册失败: {e}")
-
     def _init_storage(self) -> Storage:
         try:
             from astrbot.api.star import StarTools
@@ -81,6 +63,31 @@ class LiteInitiativePlugin(Star):
         self._enforce_max_triggers()
 
     async def initialize(self):
+        # 注册 LLM 工具（必须在异步方法中进行）
+        try:
+            from . import tools as tools_module
+            tools_module._plugin = self  # 设置模块级插件引用
+
+            # 注册工具函数
+            import astrbot.api as api_module
+            for func_name in ["list_triggers", "create_trigger", "delete_trigger", "update_trigger"]:
+                func = getattr(tools_module, func_name)
+                await api_module.register_llm_tool(func)
+
+            # 激活工具
+            for tool_name in ["list_triggers", "create_trigger", "delete_trigger", "update_trigger"]:
+                self.context.activate_llm_tool(tool_name)
+            
+            # 手动设置 handler_module_path（AstrBot 的 spec_to_func 没有自动设置）
+            llm_tools = self.context.provider_manager.llm_tools
+            for func_tool in llm_tools.func_list:
+                if func_tool.name in ["list_triggers", "create_trigger", "delete_trigger", "update_trigger"]:
+                    func_tool.handler_module_path = self.__class__.__module__
+            
+            logger.info("[LiteInitiative] LLM 工具注册成功")
+        except Exception as e:
+            logger.warning(f"[LiteInitiative] LLM 工具注册失败: {e}")
+
         self._scheduler_task = asyncio.create_task(self._scheduler_loop())
         logger.info("[LiteInitiative] 插件已激活，调度器已启动")
 
