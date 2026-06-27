@@ -12,12 +12,10 @@ from typing import Optional, Tuple
 
 from astrbot.api import logger
 from astrbot.api.event import MessageChain
-from astrbot.api.message_components import Plain
 
 from astrbot.core.cron.events import CronMessageEvent
 from astrbot.core.astr_main_agent import build_main_agent, MainAgentBuildConfig
 from astrbot.core.platform.message_session import MessageSession
-from astrbot.core.agent.message import UserMessageSegment, AssistantMessageSegment, TextPart
 
 from .time_utils import _get_now_tz, _format_time_delta, calc_sleep_end_unix
 from .data_types import Trigger
@@ -31,7 +29,7 @@ def build_agent_config(context, umo: str) -> Optional[MainAgentBuildConfig]:
         config_fields = getattr(MainAgentBuildConfig, "__dataclass_fields__", {})
         config_kwargs = {
             "tool_call_timeout": provider_settings.get("tool_call_timeout", 120),
-            "tool_schema_mode": provider_settings.get("tool_schema_mode", "full"),
+            "tool_schema_mode": "full",
             "streaming_response": False,
             "sanitize_context_by_modalities": provider_settings.get("sanitize_context_by_modalities", False),
             "context_limit_reached_strategy": provider_settings.get("context_limit_reached_strategy", "truncate_by_turns"),
@@ -179,11 +177,11 @@ async def run_ai_decision(
 
 
 async def run_trigger(context, config_reader, trigger: Trigger) -> Tuple[Optional[str], bool]:
-    """执行 direct_send 触发器，返回 (回复文本, 是否发送成功)"""
+    """执行触发器，返回 (回复文本, 是否发送成功)"""
     if trigger.direct_send:
-        return await run_trigger_agent(context, trigger)
-    else:
         return await run_trigger_plain(context, trigger)
+    else:
+        return await run_trigger_agent(context, trigger)
 
 
 async def run_trigger_agent(context, trigger: Trigger) -> Tuple[Optional[str], bool]:
@@ -256,19 +254,25 @@ async def save_proactive_history(context, umo: str, response_text: str):
         conversation = await conv_mgr.get_conversation(umo, curr_cid)
         if not conversation:
             return
-        history = getattr(conversation, "messages", None)
-        if history is not None:
-            history.append(
-                UserMessageSegment(
-                    role="user",
-                    content=[TextPart(text="[LiteInitiative主动]")],
-                )
-            )
-            history.append(
-                AssistantMessageSegment(
-                    role="assistant",
-                    content=[TextPart(text=response_text)],
-                )
-            )
+        
+        # conversation.history 是 JSON 字符串
+        history_str = conversation.history
+        if history_str:
+            history = json.loads(history_str)
+        else:
+            history = []
+        
+        # 追加主动发言记录（使用纯 dict，与 DB 格式一致）
+        history.append({
+            "role": "user",
+            "content": [{"type": "text", "text": "[LiteInitiative主动]"}]
+        })
+        history.append({
+            "role": "assistant",
+            "content": [{"type": "text", "text": response_text}]
+        })
+        
+        # 保存回数据库
+        await conv_mgr.update_conversation(umo, curr_cid, history=history)
     except Exception as e:
         logger.warning(f"[LiteInitiative] 保存历史失败: {e}")

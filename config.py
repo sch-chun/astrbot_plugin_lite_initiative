@@ -65,7 +65,7 @@ class ConfigReader:
         return int(self.cfg.get("min_trigger_delay", 0))
     
     def get_suggest_direct_send(self) -> bool:
-        return bool(self.cfg.get("suggest_direct_send_prompt", True))
+        return bool(self.cfg.get("suggest_direct_send", True))
     
     def get_suggest_direct_send_prompt(self) -> str:
         return self.cfg.get("suggest_direct_send_prompt", "")

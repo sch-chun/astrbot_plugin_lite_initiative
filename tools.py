@@ -54,12 +54,12 @@ def _format_trigger_list(session: str) -> str:
         remaining = t["fire_at_unix"] - now_ts
         status = "⚠️ 已过期" if remaining <= 0 else f"⏳ {_format_time_delta(remaining)}后触发"
         sid = t.get("session") or "当前"
-        use_agent = t.get("use_agent", True)
+        direct_send = t.get("direct_send", True)
         extra_preview = (t.get("extra_prompt") or "无")[:30]
         lines.append(
             f"{i}. [{t['trigger_id']}] 会话={sid} | "
             f"触发时间={fire_str} ({status}) | "
-            f"agent={use_agent} | 提示词={extra_preview}"
+            f"direct_send={direct_send} | 提示词={extra_preview}"
         )
     return "\n".join(lines)
 
@@ -203,7 +203,7 @@ class UpdateTriggerTool(FunctionTool):
             "trigger_id": {"type": "string", "description": "要更新的触发器 ID"},
             "fire_at_unix": {"type": "number", "description": "新的触发时间戳（Unix 秒），不填则保持不变"},
             "extra_prompt": {"type": "string", "description": "新的触发话术指令，不填则保持不变"},
-            "use_agent": {"type": "boolean", "description": "是否使用 Agent 能力执行，不填则保持不变"}
+            "direct_send": {"type": "boolean", "description": "为 True 时直接发送原文，为 False 时走 Agent 能力生成，不填则保持不变"}
         },
         "required": ["trigger_id"]
     })
@@ -214,7 +214,7 @@ class UpdateTriggerTool(FunctionTool):
             return "❌ 缺少必填参数 trigger_id"
         fire_at_unix = kwargs.get("fire_at_unix")
         extra_prompt = kwargs.get("extra_prompt")
-        use_agent = kwargs.get("use_agent")
+        direct_send = kwargs.get("direct_send")
 
         plugin = self.plugin
         async with plugin._lock:
@@ -228,9 +228,8 @@ class UpdateTriggerTool(FunctionTool):
                 t.fire_at_unix = fire_at_unix
             if extra_prompt is not None:
                 t.extra_prompt = extra_prompt
-            if use_agent is not None:
-                t.use_agent = use_agent
+            if direct_send is not None:
+                t.direct_send = direct_send
             plugin._storage.save_triggers(plugin._triggers)
         fire_str = datetime.fromtimestamp(t.fire_at_unix).strftime("%Y-%m-%d %H:%M:%S")
-        return f"✅ 触发器 {trigger_id} 已更新：时间={fire_str}，agent={t.use_agent}"
-    
+        return f"✅ 触发器 {trigger_id} 已更新：时间={fire_str}，direct_send={t.direct_send}"
