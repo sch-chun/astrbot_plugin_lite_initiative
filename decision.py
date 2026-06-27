@@ -154,7 +154,7 @@ async def run_ai_decision(
             config=config,
             provider=None,
             req=None,
-            apply_reset=False,
+            apply_reset=True,   # ← 修复！apply_reset=True 确保 agent_runner 初始化 _state
         )
         
         if not result or not result.agent_runner:
@@ -205,7 +205,7 @@ async def run_trigger_agent(context, trigger: Trigger) -> Tuple[Optional[str], b
             config=config,
             provider=None,
             req=None,
-            apply_reset=False,
+            apply_reset=True,   # ← 同样修复 run_trigger_agent
         )
         
         if not result or not result.agent_runner:
