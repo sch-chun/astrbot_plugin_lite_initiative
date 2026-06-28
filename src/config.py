@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 LiteInitiative - 配置读取模块
 """
@@ -13,7 +11,7 @@ from .time_utils import _parse_time_str
 class ConfigReader:
     """插件配置读取器"""
     
-    def __init__(self, cfg: Any):
+    def __init__(self, cfg: Any) -> None:
         self.cfg = cfg
     
     def get_tz(self) -> Optional[str]:
@@ -31,7 +29,7 @@ class ConfigReader:
     def get_decision_prompt(self) -> str:
         return self.cfg.get("decision_prompt", "你是一个主动闲聊决策助手。")
     
-    def get_daily_analysis_times(self):
+    def get_daily_analysis_times(self) -> list:
         raw = self.cfg.get("daily_analysis_times", "09:00,14:00,21:00")
         result = []
         for part in raw.split(","):

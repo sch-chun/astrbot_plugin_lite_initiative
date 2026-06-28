@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 LiteInitiative - LLM 工具模块（类方式）
 """
@@ -8,24 +6,27 @@ from __future__ import annotations
 import time
 from datetime import datetime
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 from astrbot.api import FunctionTool
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.astr_agent_context import AstrAgentContext
 
+
 _plugin: Optional[Any] = None
+
 
 def _get_plugin():
     if _plugin is None:
         raise RuntimeError("Plugin not initialized")
     return _plugin
 
-from .time_utils import _get_now_tz, _parse_trigger_time, calc_sleep_end_unix, _is_in_sleep_hours, _format_time_delta
+
+from .time_utils import _get_now_tz, _parse_trigger_time, _is_in_sleep_hours, _format_time_delta
 from .data_types import Trigger
 
 
-def _list_for_session(session: str = "") -> List[dict]:
+def _list_for_session(session: str = "") -> list[dict]:
     tlist = []
     for t in _get_plugin()._triggers.values():
         if not session or t.session == session:

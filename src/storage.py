@@ -1,14 +1,10 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 LiteInitiative - 持久化存储模块
 """
-
 from __future__ import annotations
 
 import json
 import os
-from typing import Dict
 
 from astrbot.api import logger
 from .data_types import Trigger, SessionState
@@ -16,14 +12,13 @@ from .data_types import Trigger, SessionState
 
 class Storage:
     """JSON 文件持久化存储"""
-    
-    def __init__(self, data_dir: str):
+    def __init__(self, data_dir: str) -> None:
         self.data_dir = data_dir
         os.makedirs(data_dir, exist_ok=True)
         self.trigger_file = os.path.join(data_dir, "triggers.json")
         self.state_file = os.path.join(data_dir, "session_states.json")
     
-    def save_triggers(self, triggers: Dict[str, Trigger]):
+    def save_triggers(self, triggers: dict[str, Trigger]) -> None:
         try:
             data = {tid: t.to_dict() for tid, t in triggers.items()}
             with open(self.trigger_file, "w", encoding="utf-8") as f:
@@ -31,7 +26,7 @@ class Storage:
         except Exception as e:
             logger.error(f"[LiteInitiative] 保存触发器失败: {e}")
     
-    def load_triggers(self) -> Dict[str, Trigger]:
+    def load_triggers(self) -> dict[str, Trigger]:
         if not os.path.exists(self.trigger_file):
             return {}
         try:
@@ -44,7 +39,7 @@ class Storage:
             logger.error(f"[LiteInitiative] 加载触发器失败: {e}")
             return {}
     
-    def save_states(self, sessions: Dict[str, SessionState], last_user_msg: Dict[str, float]):
+    def save_states(self, sessions: dict[str, SessionState], last_user_msg: dict[str, float]) -> None:
         try:
             data = {sid: s.to_dict() for sid, s in sessions.items()}
             data["last_user_msg_unix"] = last_user_msg
@@ -53,7 +48,7 @@ class Storage:
         except Exception as e:
             logger.error(f"[LiteInitiative] 保存状态失败: {e}")
     
-    def load_states(self) -> tuple[Dict[str, SessionState], Dict[str, float]]:
+    def load_states(self) -> tuple[dict[str, SessionState], dict[str, float]]:
         if not os.path.exists(self.state_file):
             return {}, {}
         try:

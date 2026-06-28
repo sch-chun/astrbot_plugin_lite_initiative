@@ -1,6 +1,6 @@
 name: astrbot_plugin_lite_initiative
 display_name: Lite Initiative
 desc: "AI 驱动的智能主动闲聊插件：超时决策 + 定时分析 + 触发器队列管理。AI 通过函数工具自主创建/删改触发器，支持睡眠时段、时区、无活动停用等功能。"
-version: v0.2.0
+version: v0.2.1
 author: sch-chun
 repo: https://github.com/sch-chun/astrbot_plugin_lite_initiative

@@ -1,15 +1,12 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 LiteInitiative - 数据结构定义
 """
-
 from __future__ import annotations
 
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -21,7 +18,7 @@ class Trigger:
     extra_prompt: str = ""
     direct_send: bool = True
     created_at: float = field(default_factory=time.time)
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {

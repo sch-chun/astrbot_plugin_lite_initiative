@@ -1,14 +1,10 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 LiteInitiative - AI 决策与执行模块
 """
-
 from __future__ import annotations
 
 import json
-from datetime import datetime
-from typing import Optional, Tuple
+from typing import Optional
 
 from astrbot.api import logger
 from astrbot.api.event import MessageChain
@@ -17,7 +13,7 @@ from astrbot.core.cron.events import CronMessageEvent
 from astrbot.core.astr_main_agent import build_main_agent, MainAgentBuildConfig
 from astrbot.core.platform.message_session import MessageSession
 
-from .time_utils import _get_now_tz, _format_time_delta, calc_sleep_end_unix
+from .time_utils import _get_now_tz, _format_time_delta
 from .data_types import Trigger
 
 
@@ -49,6 +45,7 @@ def build_agent_config(context, umo: str) -> Optional[MainAgentBuildConfig]:
             config_kwargs["llm_compress_keep_recent_ratio"] = provider_settings.get("llm_compress_keep_recent_ratio", 0.15)
         elif "llm_compress_keep_recent" in config_fields:
             config_kwargs["llm_compress_keep_recent"] = provider_settings.get("llm_compress_keep_recent", 4)
+
         # 只传入 config_fields 中存在的键
         filtered_kwargs = {k: v for k, v in config_kwargs.items() if k in config_fields}
         return MainAgentBuildConfig(**filtered_kwargs)
@@ -62,7 +59,6 @@ async def run_ai_decision(
     config_reader,
     umo: str,
     trigger_list: list,
-    silence_sec: float,
     decision_prompt: str,
 ) -> bool:
     """运行 AI 决策，返回是否成功"""
@@ -80,7 +76,6 @@ async def run_ai_decision(
         date_tip = (
             f"\n当前时间: {now_str}\n"
             f"时区: {tz or '系统默认'}\n"
-            f"沉默时长: {_format_time_delta(silence_sec)}\n"
             f"会话 ID: {umo}\n"
         )
 
@@ -144,7 +139,7 @@ async def run_ai_decision(
         provider = None
         if decision_provider_id:
             try:
-                provider = context.provider_manager.get_provider_by_id(decision_provider_id)
+                provider = await context.provider_manager.get_provider_by_id(decision_provider_id)
                 if provider is None:
                     logger.info(f"[LiteInitiative] 未找到提供商 '{decision_provider_id}'，将使用默认模型。")
             except Exception as e:
@@ -176,7 +171,7 @@ async def run_ai_decision(
         return False
 
 
-async def run_trigger(context, config_reader, trigger: Trigger) -> Tuple[Optional[str], bool]:
+async def run_trigger(context, config_reader, trigger: Trigger) -> tuple[Optional[str], bool]:
     """执行触发器，返回 (回复文本, 是否发送成功)"""
     if trigger.direct_send:
         return await run_trigger_plain(context, trigger)
@@ -184,7 +179,7 @@ async def run_trigger(context, config_reader, trigger: Trigger) -> Tuple[Optiona
         return await run_trigger_agent(context, trigger)
 
 
-async def run_trigger_agent(context, trigger: Trigger) -> Tuple[Optional[str], bool]:
+async def run_trigger_agent(context, trigger: Trigger) -> tuple[Optional[str], bool]:
     """使用 Agent 能力执行触发器"""
     try:
         umo = trigger.session or ""
@@ -229,7 +224,7 @@ async def run_trigger_agent(context, trigger: Trigger) -> Tuple[Optional[str], b
         return None, False
 
 
-async def run_trigger_plain(context, trigger: Trigger) -> Tuple[Optional[str], bool]:
+async def run_trigger_plain(context, trigger: Trigger) -> tuple[Optional[str], bool]:
     """降级纯文本发送"""
     try:
         umo = trigger.session or ""
@@ -242,7 +237,7 @@ async def run_trigger_plain(context, trigger: Trigger) -> Tuple[Optional[str], b
         return None, False
 
 
-async def save_proactive_history(context, umo: str, response_text: str):
+async def save_proactive_history(context, umo: str, response_text: str) -> None:
     """保存主动发言的历史记录"""
     try:
         conv_mgr = context.conversation_manager

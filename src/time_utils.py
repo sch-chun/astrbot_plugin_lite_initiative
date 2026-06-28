@@ -1,14 +1,11 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 LiteInitiative - 时间工具模块
 """
-
 from __future__ import annotations
 
 import re
 from datetime import datetime, time as dt_time
-from typing import Optional, Tuple
+from typing import Optional
 
 
 def _get_now_tz(tz_name: str | None) -> datetime:
@@ -22,7 +19,7 @@ def _get_now_tz(tz_name: str | None) -> datetime:
     return datetime.now()
 
 
-def _parse_time_str(s: str) -> Optional[Tuple[int, int]]:
+def _parse_time_str(s: str) -> Optional[tuple[int, int]]:
     """解析 HH:MM 格式的时间字符串"""
     s = s.strip()
     m = re.match(r"^([01]?\d|2[0-3]):([0-5]\d)$", s)

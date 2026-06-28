@@ -1,42 +1,39 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 LiteInitiative - AI 驱动的智能主动闲聊插件
 """
-
 from __future__ import annotations
 
 import asyncio
 import time
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Optional, AsyncGenerator
 
 from astrbot.api import logger
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 
-from .time_utils import _get_now_tz, _format_time_delta
-from .data_types import Trigger, SessionState
-from .config import ConfigReader
-from .storage import Storage
-from .decision import run_ai_decision, run_trigger, save_proactive_history
+from .src.time_utils import _get_now_tz, _format_time_delta
+from .src.data_types import Trigger, SessionState
+from .src.config import ConfigReader
+from .src.storage import Storage
+from .src.decision import run_ai_decision, run_trigger, save_proactive_history
 
 
 @register(
     "astrbot_plugin_lite_initiative",
     "sch-chun",
     "AI 驱动的智能主动闲聊插件：超时决策 + 定时分析 + AI 函数工具管理触发器队列",
-    "0.1.0",
+    "0.2.1",
     "https://github.com/sch-chun/astrbot_plugin_lite_initiative",
 )
 class LiteInitiativePlugin(Star):
-    def __init__(self, context: Context, config: Any):
+    def __init__(self, context: Context, config: Any) -> None:
         super().__init__(context)
         self._config = ConfigReader(config)
         self._lock = asyncio.Lock()
-        self._triggers: Dict[str, Trigger] = {}
-        self._sessions: Dict[str, SessionState] = {}
-        self._last_user_msg: Dict[str, float] = {}
+        self._triggers: dict[str, Trigger] = {}
+        self._sessions: dict[str, SessionState] = {}
+        self._last_user_msg: dict[str, float] = {}
         self._scheduler_task: Optional[asyncio.Task] = None
         self._firing_ids: set = set()
         self._stopped: bool = False
@@ -62,10 +59,10 @@ class LiteInitiativePlugin(Star):
         # 启动时按会话分别修剪
         self._enforce_max_triggers()
 
-    async def initialize(self):
+    async def initialize(self) -> None:
 
         # 注册 LLM 工具（类方式）
-        from . import tools
+        from .src import tools
 
         # 设置模块级插件引用（便于辅助函数使用）
         tools._plugin = self
@@ -85,7 +82,7 @@ class LiteInitiativePlugin(Star):
         self._scheduler_task = asyncio.create_task(self._scheduler_loop())
         logger.info("[LiteInitiative] 插件已激活，调度器已启动")
 
-    async def terminate(self):
+    async def terminate(self) -> None:
         self._stopped = True
         if self._scheduler_task:
             self._scheduler_task.cancel()
@@ -102,7 +99,7 @@ class LiteInitiativePlugin(Star):
 
     # ─────────────────────── 触发器管理 ───────────────────────
 
-    def _enforce_max_triggers(self):
+    def _enforce_max_triggers(self) -> None:
         """按每个会话分别限制触发器数量，超出时删除最早创建的。"""
         max_n = self._config.get_max_triggers()
         
@@ -115,6 +112,7 @@ class LiteInitiativePlugin(Star):
         for session, triggers in sessions.items():
             if len(triggers) <= max_n:
                 continue
+            
             # 按创建时间排序，保留最新的 max_n 个
             sorted_t = sorted(triggers, key=lambda t: t.created_at)
             for t in sorted_t[:len(triggers) - max_n]:
@@ -134,7 +132,7 @@ class LiteInitiativePlugin(Star):
     # ─────────────────────── 消息事件 ───────────────────────
 
     @filter.on_llm_response()
-    async def _on_llm_response(self, event: AstrMessageEvent, _response=None):
+    async def _on_llm_response(self, event: AstrMessageEvent, _response=None) -> None:
         """AI 回复后启动超时计时"""
         if event.get_extra("lite_initiative_proactive") or event.get_extra("lite_initiative_decision"):
             return
@@ -153,7 +151,7 @@ class LiteInitiativePlugin(Star):
             logger.debug(f"[LiteInitiative] 超时计时启动: {umo}, {timeout_sec}s")
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
-    async def _on_user_message(self, event: AstrMessageEvent):
+    async def _on_user_message(self, event: AstrMessageEvent) -> None:
         """用户发消息：更新活跃时间，清空超时时间内所有触发器"""
         if not event.message_obj.message and not event.message_str:
             logger.debug(f"[LiteInitiative] 忽略空消息事件：{event.unified_msg_origin}")
@@ -205,12 +203,14 @@ class LiteInitiativePlugin(Star):
 
         async with self._lock:
             s = self._get_or_create_session(umo)
+            
             # 防重入
             if s.decision_in_progress:
                 return
             s.decision_in_progress = True
 
         now_ts = time.time()
+
         # 计算沉默时间
         last_active = max(s.last_user_msg_unix or 0, s.last_ai_reply_unix or 0)
         silence_sec = now_ts - last_active
@@ -219,6 +219,7 @@ class LiteInitiativePlugin(Star):
         if is_daily:
             inactive_h = self._config.get_inactive_threshold_hours()
             if inactive_h > 0 and silence_sec >= inactive_h * 3600:
+
                 # 用户已长时间不活跃，跳过分析
                 async with self._lock:
                     s.decision_in_progress = False
@@ -235,7 +236,6 @@ class LiteInitiativePlugin(Star):
                 config_reader=self._config,
                 umo=umo,
                 trigger_list=trigger_list,
-                silence_sec=silence_sec,
                 decision_prompt=prompt
             )
         except Exception as e:
@@ -247,7 +247,7 @@ class LiteInitiativePlugin(Star):
 
     # ─────────────────────── 超时决策 ───────────────────────
 
-    async def _timeout_decision(self, umo: str, timeout_sec: int):
+    async def _timeout_decision(self, umo: str, timeout_sec: int) -> None:
         try:
             await asyncio.sleep(timeout_sec)
         except asyncio.CancelledError:
@@ -269,7 +269,7 @@ class LiteInitiativePlugin(Star):
 
     # ─────────────────────── 每日分析 ───────────────────────
 
-    async def _daily_analysis_check(self):
+    async def _daily_analysis_check(self) -> None:
         now = _get_now_tz(self._config.get_tz())
         times = self._config.get_daily_analysis_times()
         if not times or (now.hour, now.minute) not in times:
@@ -305,7 +305,7 @@ class LiteInitiativePlugin(Star):
 
     # ─────────────────────── 调度器 ───────────────────────
 
-    async def _scheduler_loop(self):
+    async def _scheduler_loop(self) -> None:
         try:
             while not self._stopped:
                 await asyncio.sleep(30)
@@ -319,7 +319,7 @@ class LiteInitiativePlugin(Star):
         finally:
             logger.info("[LiteInitiative] Scheduler stopped.")
 
-    async def _tick(self):
+    async def _tick(self) -> None:
         now_ts = time.time()
         try:
             await self._daily_analysis_check()
@@ -339,7 +339,7 @@ class LiteInitiativePlugin(Star):
             if expired:
                 self._storage.save_triggers(self._triggers)
 
-    async def _execute_trigger(self, trigger: Trigger):
+    async def _execute_trigger(self, trigger: Trigger) -> None:
         if trigger.trigger_id in self._firing_ids:
             return
         self._firing_ids.add(trigger.trigger_id)
@@ -369,7 +369,7 @@ class LiteInitiativePlugin(Star):
     # ─────────────────────── 用户指令 ───────────────────────
 
     @filter.command("li_help")
-    async def _cmd_help(self, event: AstrMessageEvent):
+    async def _cmd_help(self, event: AstrMessageEvent) -> AsyncGenerator:
         """查看 LiteInitiative 插件帮助"""
         yield event.plain_result(
             "LiteInitiative 插件使用指南：\n\n"
@@ -384,7 +384,7 @@ class LiteInitiativePlugin(Star):
         )
 
     @filter.command("li_list")
-    async def _cmd_list(self, event: AstrMessageEvent):
+    async def _cmd_list(self, event: AstrMessageEvent) -> AsyncGenerator:
         """列出当前所有触发器"""
         tlist = self._list_for_session(event.unified_msg_origin)
         if not tlist:
@@ -400,11 +400,11 @@ class LiteInitiativePlugin(Star):
             except Exception:
                 fire_str = fire_dt.strftime("%Y-%m-%d %H:%M:%S")
             extra_preview = (t.get("extra_prompt") or "无")[:40]
-            lines.append(f"{i}. [{t['trigger_id']}] 触发={fire_str} | agent={t.get('use_agent', True)} | {extra_preview}")
+            lines.append(f"{i}. [{t['trigger_id']}] 触发={fire_str} | direct_send={t.get('direct_send', False)} | {extra_preview}……")
         yield event.plain_result("\n".join(lines))
 
     @filter.command("li_clear")
-    async def _cmd_clear(self, event: AstrMessageEvent):
+    async def _cmd_clear(self, event: AstrMessageEvent) -> AsyncGenerator:
         """清空所有触发器（需管理员）"""
         if event.role != "admin":
             yield event.plain_result("❌ 只有管理员可以使用此命令。")
@@ -416,7 +416,7 @@ class LiteInitiativePlugin(Star):
         yield event.plain_result(f"✅ 已清空 {count} 个触发器。")
 
     @filter.command("li_status")
-    async def _cmd_status(self, event: AstrMessageEvent):
+    async def _cmd_status(self, event: AstrMessageEvent) -> AsyncGenerator:
         """查看插件状态"""
         umo = event.unified_msg_origin
         last_user = self._last_user_msg.get(umo, 0)
@@ -438,6 +438,7 @@ class LiteInitiativePlugin(Star):
         if not whitelist:
             return True
         try:
+
             # unified_msg_origin 格式: platform_id:message_type:session_id
             parts = umo.split(":", 2)
             if len(parts) == 3:
@@ -448,23 +449,25 @@ class LiteInitiativePlugin(Star):
         return False
     
     @filter.command("li_debug_timeout")
-    async def _cmd_debug_timeout(self, event: AstrMessageEvent):
+    async def _cmd_debug_timeout(self, event: AstrMessageEvent) -> AsyncGenerator:
         """手动触发超时决策（调试用）"""
         umo = event.unified_msg_origin
         if not self._is_user_whitelisted(umo):
             yield event.plain_result("❌ 您不在白名单中。")
             return
+        
         # 直接调用核心方法（不等待）
         await self._perform_decision(umo, is_daily=False)
         yield event.plain_result("✅ 已手动触发超时决策，请查看日志。")
 
     @filter.command("li_debug_daily")
-    async def _cmd_debug_daily(self, event: AstrMessageEvent):
+    async def _cmd_debug_daily(self, event: AstrMessageEvent) -> AsyncGenerator:
         """手动触发每日分析（调试用）"""
         umo = event.unified_msg_origin
         if not self._is_user_whitelisted(umo):
             yield event.plain_result("❌ 您不在白名单中。")
             return
+        
         # 直接调用核心方法（强制每日分析）
         await self._perform_decision(umo, is_daily=True)
         yield event.plain_result("✅ 已手动触发每日分析，请查看日志。")

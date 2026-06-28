@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2026-06-28
+
+## Fixed
+
+- 修复 /li_list 的错误字段
+- 修复错误地同步调用 get_provider_by_id 导致提供商配置无法生效的问题
+
+## Changed
+
+- 模块文件全部移至 src 下
+- 删除沉默时间提醒，避免 AI 过于谨慎
+
 ## [0.2.1] - 2026-06-28
 
 ### Fixed
