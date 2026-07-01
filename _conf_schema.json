@@ -29,6 +29,12 @@
     "hint": "超时后触发决策",
     "default": 300
   },
+    "decision_trigger_probability": {
+      "type": "float",
+      "description": "超时决策触发概率（%）",
+      "default": 100,
+      "hint": "每次超时后以该概率决定是否进入 AI 决策。设为 100 表示总是触发，0 表示从不触发"
+  },
   "decision_provider": {
     "type": "string",
     "description": "决策阶段使用的模型提供商 ID",

@@ -11,6 +11,7 @@ from typing import Any, Optional, AsyncGenerator
 from astrbot.api import logger
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
+from astrbot.api.provider import LLMResponse
 
 from .src.time_utils import _get_now_tz, _format_time_delta
 from .src.data_types import Trigger, SessionState
@@ -23,7 +24,7 @@ from .src.decision import run_ai_decision, run_trigger, save_proactive_history
     "astrbot_plugin_lite_initiative",
     "sch-chun",
     "AI 驱动的智能主动闲聊插件：超时决策 + 定时分析 + AI 函数工具管理触发器队列",
-    "0.2.1",
+    "0.2.3",
     "https://github.com/sch-chun/astrbot_plugin_lite_initiative",
 )
 class LiteInitiativePlugin(Star):
@@ -52,7 +53,7 @@ class LiteInitiativePlugin(Star):
             base = os.path.join(os.getcwd(), "data", "plugin_data", "astrbot_plugin_lite_initiative")
         return Storage(str(base))
 
-    def _load_all(self):
+    def _load_all(self) -> None:
         self._triggers = self._storage.load_triggers()
         self._sessions, self._last_user_msg = self._storage.load_states()
 
@@ -132,7 +133,7 @@ class LiteInitiativePlugin(Star):
     # ─────────────────────── 消息事件 ───────────────────────
 
     @filter.on_llm_response()
-    async def _on_llm_response(self, event: AstrMessageEvent, _response=None) -> None:
+    async def _on_llm_response(self, event: AstrMessageEvent, _response: Optional[LLMResponse] = None) -> None:
         """AI 回复后启动超时计时"""
         if event.get_extra("lite_initiative_proactive") or event.get_extra("lite_initiative_decision"):
             return
@@ -248,10 +249,22 @@ class LiteInitiativePlugin(Star):
     # ─────────────────────── 超时决策 ───────────────────────
 
     async def _timeout_decision(self, umo: str, timeout_sec: int) -> None:
+        """超时后执行决策"""
+        if not self._is_user_whitelisted(umo):
+            return
+        
         try:
             await asyncio.sleep(timeout_sec)
         except asyncio.CancelledError:
             return
+        
+        prob = self._config.get_decision_trigger_probability()
+        if prob < 100:
+            import random
+            roll = random.uniform(0, 100)
+            if roll > prob:
+                logger.info(f"[LiteInitiative] 超时决策跳过({umo}), 概率={prob}%, 会话={umo}")
+                return
 
         async with self._lock:
             s = self._sessions.get(umo)

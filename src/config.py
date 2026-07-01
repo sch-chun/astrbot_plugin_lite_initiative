@@ -1,11 +1,12 @@
 """
 LiteInitiative - 配置读取模块
 """
-
 from __future__ import annotations
 
 from typing import Any, Optional
 from .time_utils import _parse_time_str
+
+from astrbot.api import logger
 
 
 class ConfigReader:
@@ -67,3 +68,12 @@ class ConfigReader:
     
     def get_suggest_direct_send_prompt(self) -> str:
         return self.cfg.get("suggest_direct_send_prompt", "")
+    
+    def get_decision_trigger_probability(self) -> float:
+        """获取超时决策触发概率（%），若未配置则返回 100"""
+        val = self.cfg.get("decision_trigger_probability", 100)
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid decision_trigger_probability value: {val}. Using default 100.0")
+            return 100.0

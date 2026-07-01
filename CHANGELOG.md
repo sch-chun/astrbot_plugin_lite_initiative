@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.3] - 2026-07-01
+
+### Added
+
+- 增加概率筛选功能
+
 ## [0.2.2] - 2026-06-28
 
 ## Fixed

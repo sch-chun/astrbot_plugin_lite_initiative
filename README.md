@@ -1,10 +1,10 @@
-# LiteInitiative - AI 驱动的智能主动闲聊插件
+# Lite Initiative - AI 驱动的智能主动闲聊插件
 
 简体中文
 
 ## 简介
 
-LiteInitiative 是一个让 AI 能够主动发起对话的 AstrBot 插件。通过**超时决策**和**定时分析**机制，AI 可以自主判断并创建触发器，在合适的时机主动与用户交流。
+Lite Initiative 是一个让 AI 能够主动发起私聊对话的 AstrBot 插件。通过**超时决策**和**定时分析**机制，AI 可以自主判断并创建触发器，在合适的时机主动与用户交流。
 
 ## 功能特性
 
@@ -45,6 +45,7 @@ AI 可通过以下 LLM 函数工具管理触发器：
 - 睡眠时段（AI 不会在该时段主动发言，支持跨天）
 - 超时等待时间
 - 最小触发器延迟（强制 AI 短时主动时直接发送，减少额外 LLM 调用）
+- 超时决策触发概率
 - 决策专用 LLM 提供商（与主模型分离）
 - 直接发送建议提示（提示 AI 何时使用直接发送代替触发器）
 - 最大触发器数量限制（per-session）
@@ -60,6 +61,7 @@ AI 可通过以下 LLM 函数工具管理触发器：
 | `sleep_hours` | string | `"23:00-07:00"` | 睡眠时段（格式 `HH:MM-HH:MM`，支持跨天） |
 | `max_triggers` | int | `5` | 单个会话最大触发器数量 |
 | `decision_timeout_seconds` | int | `300` | AI 回复后等待超时时间（秒） |
+| `decision_trigger_probability` | float | `100` | 超时决策触发概率（%） |
 | `decision_prompt` | text | (见配置) | 超时决策时的 AI 系统提示词 |
 | `decision_provider` | string | `""` | 决策阶段使用的 LLM 提供商 ID（留空则使用主模型） |
 | `min_trigger_delay` | int | `0` | 最小触发器延迟（秒），强制短时主动直接发送（0 表示不限制） |
@@ -70,15 +72,6 @@ AI 可通过以下 LLM 函数工具管理触发器：
 | `inactive_threshold_hours` | int | `24` | 用户多少小时内无消息时停用每日分析（0 表示永不停止） |
 | `inject_date_tip` | bool | `true` | 是否在提示词中注入当前日期和节假日信息 |
 | `trigger_persist` | bool | `true` | 是否持久化保存触发器队列（重启后恢复） |
-
-### 默认 decision_prompt
-
-```
-你是一个主动闲聊决策助手。根据当前对话上下文和用户沉默时间，判断是否需要在未来某个时间点主动发起聊天。如果决定发起，请使用本插件的触发器管理工具创建触发器。
-重要：本插件的 create_trigger 仅用于创建会被用户消息清空的临时闲聊触发器。
-如需创建持久定时任务（闹钟、提醒等），必须使用系统内置的 future_task 工具。
-请务必根据任务性质选择正确的工具。
-```
 
 ## 工作原理
 
@@ -161,8 +154,11 @@ AI 可通过以下 LLM 函数工具管理触发器：
 4. **防重入机制**：决策过程中不会重复触发，避免并发问题
 5. **白名单过滤**：建议配置白名单，仅对特定用户启用插件
 6. **持久化存储**：触发器和会话状态会持久化保存，重启后自动恢复
-7. **非闲聊任务**：对于闹钟、提醒等持久定时任务，请使用平台的 `future_task` 工具，而非本插件的触发器
 8. **最小触发器延迟**：配置 `min_trigger_delay` 后，AI 试图在短时内创建触发器会被拒绝，必须使用直接发送
+
+本插件仅支持私聊主动消息。群聊功能推荐插件 [Chat Plus](https://github.com/Him666233/astrbot_plugin_group_chat_plus)
+
+> _Do one thing well._
 
 ## 项目结构
 
@@ -180,39 +176,6 @@ astrbot_plugin_lite_initiative/
 └── README.md            # 本文档
 ```
 
-## 更新日志
-
-### v0.2.1（最新）
-
-**Bug 修复：**
-- 修复 `UpdateTriggerTool` 中使用了已废弃的 `use_agent` 字段名（应使用 `direct_send`），导致更新触发器时崩溃
-- 修复 `build_agent_config` 未强制设置 `tool_schema_mode` 为 `"full"`，导致某些 provider 在 `skills_like` 模式下工具调用失败
-- 修复 `save_proactive_history` 尝试写入 `conversation.messages` 但 `Conversation` 无此属性，导致历史记录保存静默失败
-- 修复 `get_suggest_direct_send()` 错误读取 `suggest_direct_send_prompt` 键而非 `suggest_direct_send`
-- 修复 `run_trigger` 中 `direct_send` 逻辑反转
-
-**文档更新：**
-- 移除 README 中已删除的 `decision_max_history_messages` 和 `daily_analysis_max_history_messages` 配置项
-- 新增 `decision_provider`、`min_trigger_delay`、`suggest_direct_send`、`suggest_direct_send_prompt` 配置说明
-- 修正 "用户消息清空所有触发器" 为 "清空即将触发的触发器"
-
-### v0.2.0
-
-- **重构优化**：代码模块化，main.py 从 ~500 行精简到 ~250 行
-- **新增白名单**：支持按会话 ID 过滤用户
-- **防重入保护**：避免决策过程重复触发
-- **Per-session 限制**：触发器数量限制改为按会话分别计算
-- **用户消息清空策略优化**：仅清空即将触发的，保留远期触发器
-- **异步锁保护**：防止并发操作导致的数据竞争
-- **去掉 source 参数**：非闲聊任务改用平台 future_task 工具
-- **相对导入**：使用相对导入提升模块化程度
-
-### v0.1.0
-
-- 初始版本
-- 支持超时决策和每日定时分析
-- AI 可通过函数工具管理触发器队列
-
 ## 许可证
 
 MIT License
@@ -220,3 +183,4 @@ MIT License
 ## 问题反馈
 
 如遇到问题或有任何建议，请提交 Issue：https://github.com/sch-chun/astrbot_plugin_lite_initiative/issues
+
