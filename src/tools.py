@@ -153,7 +153,10 @@ class CreateTriggerTool(FunctionTool):
             if len(session_triggers) >= max_n:
                 return f"❌ 创建失败：当前会话已达上限（{max_n} 个）。\n\n{_format_trigger_list(session)}\n\n💡 请先删除旧触发器再重试。"
 
+            sender_id = event.get_sender_id()
+
             t = Trigger(
+                sender_id=sender_id,
                 fire_at_unix=fire_at_unix,
                 session=session,
                 extra_prompt=extra_prompt,

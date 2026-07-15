@@ -190,6 +190,12 @@ async def run_trigger_agent(context, trigger: Trigger) -> tuple[Optional[str], b
             message=trigger.extra_prompt or "你决定主动和用户聊聊天吧，自然一点。",
             extras={"lite_initiative_proactive": True, "trigger_id": trigger.trigger_id},
         )
+
+        cfg = context.get_config(umo=umo)
+        trigger_owner = trigger.sender_id
+        admin_ids = cfg.get("admin_id", [])
+        if trigger_owner in admin_ids:
+            cron_event.role = "admin"
         
         config = build_agent_config(context, umo)
         if not config:

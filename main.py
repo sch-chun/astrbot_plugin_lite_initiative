@@ -24,7 +24,7 @@ from .src.decision import run_ai_decision, run_trigger, save_proactive_history
     "astrbot_plugin_lite_initiative",
     "sch-chun",
     "AI 驱动的智能主动闲聊插件：超时决策 + 定时分析 + AI 函数工具管理触发器队列",
-    "0.2.3",
+    "0.2.4",
     "https://github.com/sch-chun/astrbot_plugin_lite_initiative",
 )
 class LiteInitiativePlugin(Star):

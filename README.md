@@ -160,22 +160,6 @@ AI 可通过以下 LLM 函数工具管理触发器：
 
 > _Do one thing well._
 
-## 项目结构
-
-```
-astrbot_plugin_lite_initiative/
-├── main.py              # 主插件入口
-├── config.py            # 配置读取器
-├── data_types.py        # 数据结构定义（Trigger, SessionState）
-├── decision.py          # AI 决策与执行模块
-├── storage.py           # JSON 持久化存储
-├── tools.py             # LLM 工具函数
-├── time_utils.py        # 时间工具
-├── _conf_schema.json    # 配置项定义
-├── metadata.yaml        # 插件元数据
-└── README.md            # 本文档
-```
-
 ## 许可证
 
 MIT License
@@ -183,4 +167,3 @@ MIT License
 ## 问题反馈
 
 如遇到问题或有任何建议，请提交 Issue：https://github.com/sch-chun/astrbot_plugin_lite_initiative/issues
-

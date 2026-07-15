@@ -13,6 +13,7 @@ from typing import Any, Optional
 class Trigger:
     """触发器数据模型"""
     trigger_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    sender_id: str = ""
     fire_at_unix: float = 0.0
     session: str = ""
     extra_prompt: str = ""
@@ -23,6 +24,7 @@ class Trigger:
     def to_dict(self) -> dict:
         return {
             "trigger_id": self.trigger_id,
+            "sender_id": self.sender_id,
             "fire_at_unix": self.fire_at_unix,
             "session": self.session,
             "extra_prompt": self.extra_prompt,

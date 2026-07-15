@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.4] - 2026-07-15
+
+### Fixed
+
+- 修复触发器无法继承管理员权限的问题
+
 ## [0.2.3] - 2026-07-01
 
 ### Added
@@ -10,12 +16,12 @@ All notable changes to this project will be documented in this file.
 
 ## [0.2.2] - 2026-06-28
 
-## Fixed
+### Fixed
 
 - 修复 /li_list 的错误字段
 - 修复错误地同步调用 get_provider_by_id 导致提供商配置无法生效的问题
 
-## Changed
+### Changed
 
 - 模块文件全部移至 src 下
 - 删除沉默时间提醒，避免 AI 过于谨慎
