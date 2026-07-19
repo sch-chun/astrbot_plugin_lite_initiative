@@ -31,7 +31,7 @@ class ConfigReader:
         return self.cfg.get("decision_prompt", "你是一个主动闲聊决策助手。")
     
     def get_daily_analysis_times(self) -> list:
-        raw = self.cfg.get("daily_analysis_times", "09:00,14:00,21:00")
+        raw = self.cfg.get("daily_analysis_times", "07:00,16:00")
         result = []
         for part in raw.split(","):
             part = part.strip()

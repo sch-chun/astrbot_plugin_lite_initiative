@@ -4,6 +4,7 @@ LiteInitiative - AI 决策与执行模块
 from __future__ import annotations
 
 import json
+
 from typing import Optional
 
 from astrbot.api import logger
@@ -71,13 +72,37 @@ async def run_ai_decision(
     now = _get_now_tz(tz)
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
     
+    # 构建日期和节假日信息
     date_tip = ""
+    tz = config_reader.get_tz()
+    now = _get_now_tz(tz)
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    date_tip = (
+        f"当前时间: {now_str}\n"
+        f"时区: {tz or '系统默认'}\n"
+        f"会话 ID: {umo}\n"
+    )
+    
+    holiday_tip = ""
     if config_reader.get_inject_date_tip():
-        date_tip = (
-            f"\n当前时间: {now_str}\n"
-            f"时区: {tz or '系统默认'}\n"
-            f"会话 ID: {umo}\n"
-        )
+
+        # 尝试注入节假日信息
+        try:
+
+            import chinese_calendar as cc
+
+            date = now.date()
+            if cc.is_holiday(date):
+                holiday_name = cc.get_holiday_detail(date)[0]
+                holiday_tip = f"📅 今日是 {holiday_name}。\n"
+            elif cc.is_workday(date):
+                holiday_tip = "📅 今日是工作日。\n"
+            else:
+                holiday_tip = "📅 今日是非工作日。\n"
+        except ImportError:
+
+            # chinese_calendar 未安装，忽略
+            pass
 
     suggest_direct_send = config_reader.get_suggest_direct_send()
     suggest_prompt = ""
@@ -106,6 +131,7 @@ async def run_ai_decision(
     
     full_prompt = (
         f"{date_tip}\n"
+        f"{holiday_tip}\n"
         f"当前触发器队列：\n"
         f"{json.dumps(trigger_list, ensure_ascii=False, indent=2) if trigger_list else '(无)'}\n\n"
         f"{decision_prompt}\n\n"
@@ -158,8 +184,78 @@ async def run_ai_decision(
             return False
         
         runner = result.agent_runner
+        initial_msg_count = len(runner.run_context.messages)
         async for _ in runner.step_until_done(30):
             pass
+
+        # 保存通过 send_message_to_user 发送的主动消息历史
+        try:
+            if runner is not None:
+
+                # 只处理本次决策新增的消息
+                new_messages = runner.run_context.messages[initial_msg_count:]
+                if not new_messages:
+                    logger.debug("[LiteInitiative] 本次决策无新增消息")
+                    return True
+                
+                # 收集已执行工具调用的 ID 及其返回结果（只扫描新增消息）
+                executed_tool_call_results = {}
+                for msg in new_messages:
+                    if msg.role == "tool" and hasattr(msg, "tool_call_id"):
+                        executed_tool_call_results[msg.tool_call_id] = msg.content if hasattr(msg, "content") else ""
+                
+                # 遍历新增的 assistant 消息，提取 send_message_to_user 调用
+                for msg in new_messages:
+                    if msg.role != "assistant":
+                        continue
+                    tool_calls = getattr(msg, "tool_calls", None)
+                    if not tool_calls:
+                        continue
+                    for tc in tool_calls:
+                        if not hasattr(tc, "function"):
+                            continue
+                        func = tc.function
+                        if not hasattr(func, "name") or func.name != "send_message_to_user":
+                            continue
+                        # 检查是否执行过且有成功结果
+                        if not hasattr(tc, "id") or tc.id not in executed_tool_call_results:
+                            continue
+                        result_text = executed_tool_call_results[tc.id]
+                        if "Message sent" not in result_text or "error" in result_text.lower():
+                            logger.debug(f"[LiteInitiative] 跳过未成功发送的调用: {result_text[:50]}")
+                            continue
+                        args_str = getattr(func, "arguments", None)
+                        if not args_str:
+                            continue
+                        try:
+                            args = json.loads(args_str)
+                        except json.JSONDecodeError:
+                            logger.warning(f"[LiteInitiative] 无法解析 send_message_to_user 参数: {args_str}")
+                            continue
+                        msgs = args.get("messages", [])
+                        text_parts = []
+                        for m in msgs:
+                            if m.get("type") == "plain":
+                                text_parts.append(m.get("text", ""))
+                        if not text_parts:
+                            continue
+                        full_text = "\n".join(text_parts)
+                        target_umo = args.get("session") or umo
+                        if target_umo != umo and ":" not in target_umo:
+                            try:
+                                cur = MessageSession.from_str(umo)
+                                target_umo = str(MessageSession(
+                                    platform_name=cur.platform_id,
+                                    message_type=cur.message_type,
+                                    session_id=target_umo,
+                                ))
+                            except Exception:
+                                logger.warning(f"[LiteInitiative] 无法补全目标会话 ID: {target_umo}，使用当前会话")
+                                target_umo = umo
+                        await save_proactive_history(context, target_umo, full_text)
+                        logger.info(f"[LiteInitiative] 保存主动消息历史到 {target_umo}: {full_text[:80]}...")
+        except Exception as e:
+            logger.warning(f"[LiteInitiative] 保存主动消息历史失败: {e}", exc_info=True)
         
         llm_resp = runner.get_final_llm_resp()
         if llm_resp and llm_resp.completion_text:
@@ -266,7 +362,7 @@ async def save_proactive_history(context, umo: str, response_text: str) -> None:
         # 追加主动发言记录（使用纯 dict，与 DB 格式一致）
         history.append({
             "role": "user",
-            "content": [{"type": "text", "text": "[LiteInitiative主动]"}]
+            "content": [{"type": "text", "text": "[Lite Initiative 主动]"}]
         })
         history.append({
             "role": "assistant",

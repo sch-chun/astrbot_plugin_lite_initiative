@@ -66,7 +66,10 @@ class Storage:
                             if isinstance(key, str) and key.count(":") >= 2
                         }
                 else:
-                    sessions[k] = SessionState.from_dict(v)
+
+                    # 只加载合法的 UMO
+                    if isinstance(v, dict) and k.count(":") >= 2:
+                        sessions[k] = SessionState.from_dict(v)
             logger.info(f"[LiteInitiative] 加载了 {len(sessions)} 个会话状态")
             return sessions, last_user_msg
         except Exception as e:

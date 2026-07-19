@@ -17,7 +17,7 @@ class Trigger:
     fire_at_unix: float = 0.0
     session: str = ""
     extra_prompt: str = ""
-    direct_send: bool = True
+    direct_send: bool = False
     created_at: float = field(default_factory=time.time)
     extra: dict[str, Any] = field(default_factory=dict)
 

@@ -1,7 +1,5 @@
-# tests/test_time_utils.py
-import time
-from datetime import datetime, timedelta
-import pytest
+from datetime import datetime
+
 from src.time_utils import (
     _get_now_tz,
     _parse_time_str,
@@ -11,14 +9,16 @@ from src.time_utils import (
     calc_sleep_end_unix,
 )
 
-def test_parse_time_str():
+
+def test_parse_time_str() -> None:
     assert _parse_time_str("23:59") == (23, 59)
     assert _parse_time_str("00:00") == (0, 0)
     assert _parse_time_str("24:00") is None
     assert _parse_time_str("12:60") is None
     assert _parse_time_str("abc") is None
 
-def test_get_now_tz():
+
+def test_get_now_tz() -> None:
     now = _get_now_tz(None)
     assert isinstance(now, datetime)
     now_sh = _get_now_tz("Asia/Shanghai")
@@ -27,7 +27,8 @@ def test_get_now_tz():
     assert offset is not None
     assert offset.total_seconds() == 28800
 
-def test_is_in_sleep_hours():
+
+def test_is_in_sleep_hours() -> None:
     now = datetime(2026, 1, 1, 2, 0, 0)
     assert _is_in_sleep_hours(now, "23:00-07:00") is True
     now = datetime(2026, 1, 1, 12, 0, 0)
@@ -39,7 +40,8 @@ def test_is_in_sleep_hours():
     now = datetime(2026, 1, 1, 10, 0, 0)
     assert _is_in_sleep_hours(now, "22:00-06:00") is False
 
-def test_format_time_delta():
+
+def test_format_time_delta() -> None:
     assert _format_time_delta(0) == "不到1分钟"
     assert _format_time_delta(30) == "不到1分钟"
     assert _format_time_delta(60) == "1分钟"
@@ -50,7 +52,8 @@ def test_format_time_delta():
     assert _format_time_delta(86400) == "1天"
     assert _format_time_delta(90000) == "1天1小时"
 
-def test_parse_trigger_time_absolute():
+
+def test_parse_trigger_time_absolute() -> None:
     now = datetime(2026, 1, 1, 12, 0, 0)
     ts = _parse_trigger_time("13:30:45", now, None)
     assert ts is not None
@@ -65,7 +68,8 @@ def test_parse_trigger_time_absolute():
     dt = datetime.fromtimestamp(ts)
     assert dt.year == 2026 and dt.month == 12 and dt.day == 31
 
-def test_parse_trigger_time_relative():
+
+def test_parse_trigger_time_relative() -> None:
     now = datetime(2026, 1, 1, 12, 0, 0)
     ts = _parse_trigger_time("After 01:30:00", now, None)
     assert ts is not None
@@ -75,7 +79,8 @@ def test_parse_trigger_time_relative():
     ts = _parse_trigger_time("After 1 hour 0 minutes 30 seconds", now, None)
     assert ts == now.timestamp() + 3630
 
-def test_calc_sleep_end_unix():
+
+def test_calc_sleep_end_unix() -> None:
     tz = "Asia/Shanghai"
     now = _get_now_tz(tz)
     end_ts = calc_sleep_end_unix("23:00-07:00", tz)

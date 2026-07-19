@@ -1,7 +1,9 @@
 import sys
 import os
+
 from unittest.mock import AsyncMock, MagicMock
 import pytest
+
 from astrbot.api.event import AstrMessageEvent
 
 
@@ -11,7 +13,7 @@ if plugin_parent not in sys.path:
 
 
 @pytest.fixture
-def mock_context():
+def mock_context() -> MagicMock:
     ctx = MagicMock()
     ctx.conversation_manager = MagicMock()
     ctx.conversation_manager.get_curr_conversation_id = AsyncMock(return_value="conv_123")
@@ -38,8 +40,9 @@ def mock_context():
     ctx.provider_manager.get_provider_by_id = AsyncMock(return_value=None)
     return ctx
 
+
 @pytest.fixture
-def mock_event():
+def mock_event() -> MagicMock:
     event = MagicMock(spec=AstrMessageEvent)
     event.unified_msg_origin = "platform:FriendMessage:user123"
     event.role = "user"
@@ -48,8 +51,9 @@ def mock_event():
     event.get_extra = MagicMock(return_value=False)
     return event
 
+
 @pytest.fixture
-def sample_config_dict():
+def sample_config_dict() -> dict:
     return {
         "whitelist": [],
         "timezone": "Asia/Shanghai",

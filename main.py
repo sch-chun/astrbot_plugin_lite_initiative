@@ -3,6 +3,13 @@ LiteInitiative - AI 驱动的智能主动闲聊插件
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+
+sys.path.insert(0, str(Path(__file__).parent))
+
+
 import asyncio
 import time
 from datetime import datetime
@@ -13,18 +20,18 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api.provider import LLMResponse
 
-from .src.time_utils import _get_now_tz, _format_time_delta
-from .src.data_types import Trigger, SessionState
-from .src.config import ConfigReader
-from .src.storage import Storage
-from .src.decision import run_ai_decision, run_trigger, save_proactive_history
+from src.time_utils import _get_now_tz, _format_time_delta
+from src.data_types import Trigger, SessionState
+from src.config import ConfigReader
+from src.storage import Storage
+from src.decision import run_ai_decision, run_trigger, save_proactive_history
 
 
 @register(
     "astrbot_plugin_lite_initiative",
     "sch-chun",
     "AI 驱动的智能主动闲聊插件：超时决策 + 定时分析 + AI 函数工具管理触发器队列",
-    "0.2.4",
+    "0.2.5",
     "https://github.com/sch-chun/astrbot_plugin_lite_initiative",
 )
 class LiteInitiativePlugin(Star):
@@ -63,7 +70,7 @@ class LiteInitiativePlugin(Star):
     async def initialize(self) -> None:
 
         # 注册 LLM 工具（类方式）
-        from .src import tools
+        from src import tools
 
         # 设置模块级插件引用（便于辅助函数使用）
         tools._plugin = self

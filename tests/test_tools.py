@@ -1,7 +1,8 @@
-# tests/test_tools.py
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import time
+
 from src.tools import (
     ListTriggersTool,
     CreateTriggerTool,
@@ -10,15 +11,23 @@ from src.tools import (
 )
 from src.data_types import Trigger
 from src.config import ConfigReader
+import src.tools
 
-# 模拟 ContextWrapper
-class MockContextWrapper:
-    def __init__(self, event):
-        self.context = MagicMock()
-        self.context.event = event
+from astrbot.core.agent.run_context import ContextWrapper
+from astrbot.core.astr_agent_context import AstrAgentContext
+
+from typing import Generator
+
+
+def make_mock_context(event: MagicMock) -> MagicMock:
+    ctx = MagicMock(spec=ContextWrapper[AstrAgentContext])
+    ctx.context = MagicMock()
+    ctx.context.event = event
+    return ctx
+
 
 @pytest.fixture
-def mock_plugin():
+def mock_plugin() -> MagicMock:
     plugin = MagicMock()
     plugin._triggers = {}
     plugin._config = ConfigReader({
@@ -35,36 +44,50 @@ def mock_plugin():
     plugin._enforce_max_triggers = MagicMock()
     return plugin
 
+
 @pytest.fixture
-def mock_event():
+def mock_event() -> MagicMock:
     event = MagicMock()
     event.unified_msg_origin = "platform:FriendMessage:user123"
     return event
 
-def test_list_triggers_tool(mock_plugin, mock_event):
+
+@pytest.fixture(autouse=True)
+def setup_tools_plugin(mock_plugin: MagicMock) -> Generator:
+    """自动在所有测试前设置 tools 模块的 plugin"""
+    original_plugin = src.tools._plugin
+    src.tools._plugin = mock_plugin
+    yield
+    src.tools._plugin = original_plugin
+
+
+@pytest.mark.asyncio
+async def test_list_triggers_tool(mock_plugin: MagicMock, mock_event: MagicMock) -> None:
     tool = ListTriggersTool(plugin=mock_plugin)
+
     # 无触发器
-    ctx = MockContextWrapper(mock_event)
-    result = tool.call(ctx)
+    ctx = make_mock_context(mock_event)
+    result = await tool.call(ctx)
     assert "当前没有待执行的触发器" in result
 
     # 添加触发器
     t = Trigger(trigger_id="t1", session=mock_event.unified_msg_origin, fire_at_unix=time.time()+100, extra_prompt="test")
     mock_plugin._triggers["t1"] = t
-    result = tool.call(ctx)
+    result = await tool.call(ctx)
     assert "t1" in result
     assert "test" in result
 
+
 @pytest.mark.asyncio
-async def test_create_trigger_tool(mock_plugin, mock_event):
+async def test_create_trigger_tool(mock_plugin: MagicMock, mock_event: MagicMock) -> None:
     tool = CreateTriggerTool(plugin=mock_plugin)
-    ctx = MockContextWrapper(mock_event)
+    ctx = make_mock_context(mock_event)
     # 缺少 fire_at_str
     result = await tool.call(ctx)
     assert "缺少必填参数" in result
 
     # 成功创建
-    with patch('astrbot_plugin_lite_initiative.tools._get_now_tz') as mock_now:
+    with patch('src.tools._get_now_tz') as mock_now:
         from datetime import datetime
         mock_now.return_value = datetime(2026, 1, 1, 12, 0, 0)
         result = await tool.call(ctx, fire_at_str="13:30:00", extra_prompt="hello", direct_send=True)
@@ -77,6 +100,7 @@ async def test_create_trigger_tool(mock_plugin, mock_event):
 
     # 超过上限
     mock_plugin._config.cfg["max_triggers"] = 1
+    
     # 先添加一个
     t2 = Trigger(trigger_id="t2", session=mock_event.unified_msg_origin, fire_at_unix=time.time()+100)
     mock_plugin._triggers["t2"] = t2
@@ -85,22 +109,24 @@ async def test_create_trigger_tool(mock_plugin, mock_event):
 
     # 睡眠时段拒绝
     mock_plugin._config.cfg["max_triggers"] = 5
-    with patch('astrbot_plugin_lite_initiative.tools._get_now_tz') as mock_now:
+    with patch('src.tools._get_now_tz') as mock_now:
         mock_now.return_value = datetime(2026, 1, 1, 1, 0, 0)
         result = await tool.call(ctx, fire_at_str="02:00:00")
         assert "睡眠时段内" in result
 
     # 最小延迟拒绝
     mock_plugin._config.cfg["min_trigger_delay"] = 60
-    with patch('astrbot_plugin_lite_initiative.tools._get_now_tz') as mock_now:
+    with patch('src.tools._get_now_tz') as mock_now:
         mock_now.return_value = datetime(2026, 1, 1, 12, 0, 0)
         result = await tool.call(ctx, fire_at_str="12:00:10")  # 10秒后
         assert "必须至少延迟" in result
 
+
 @pytest.mark.asyncio
-async def test_delete_trigger_tool(mock_plugin, mock_event):
+async def test_delete_trigger_tool(mock_plugin: MagicMock, mock_event: MagicMock) -> None:
     tool = DeleteTriggerTool(plugin=mock_plugin)
-    ctx = MockContextWrapper(mock_event)
+    ctx = make_mock_context(mock_event)
+
     # 不存在
     result = await tool.call(ctx, trigger_id="none")
     assert "未找到" in result
@@ -112,10 +138,12 @@ async def test_delete_trigger_tool(mock_plugin, mock_event):
     assert "已删除" in result
     assert "delme" not in mock_plugin._triggers
 
+
 @pytest.mark.asyncio
-async def test_update_trigger_tool(mock_plugin, mock_event):
+async def test_update_trigger_tool(mock_plugin: MagicMock, mock_event: MagicMock) -> None:
     tool = UpdateTriggerTool(plugin=mock_plugin)
-    ctx = MockContextWrapper(mock_event)
+    ctx = make_mock_context(mock_event)
+    
     # 不存在
     result = await tool.call(ctx, trigger_id="none")
     assert "未找到" in result
@@ -131,6 +159,6 @@ async def test_update_trigger_tool(mock_plugin, mock_event):
     assert t.direct_send is False
 
     # 更新到睡眠时段拒绝
-    with patch('astrbot_plugin_lite_initiative.tools._is_in_sleep_hours', return_value=True):
+    with patch('src.tools._is_in_sleep_hours', return_value=True):
         result = await tool.call(ctx, trigger_id="upd", fire_at_unix=100.0)
         assert "睡眠时段内" in result
