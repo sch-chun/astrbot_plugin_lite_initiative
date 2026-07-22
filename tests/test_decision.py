@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import json
 
-from src.decision import (
+from ..src.decision import (
     build_agent_config,
     run_ai_decision,
     run_trigger,
@@ -11,8 +11,8 @@ from src.decision import (
     run_trigger_plain,
     save_proactive_history,
 )
-from src.data_types import Trigger
-from src.config import ConfigReader
+from ..src.data_types import Trigger
+from ..src.config import ConfigReader
 
 from typing import AsyncGenerator
 
@@ -36,7 +36,7 @@ async def test_run_ai_decision(mock_context: MagicMock, sample_config_dict: dict
     async def mock_step_until_done(timeout: int) -> AsyncGenerator:
         yield
 
-    with patch('src.decision.build_main_agent') as mock_build:
+    with patch('astrbot_plugin_lite_initiative.src.decision.build_main_agent') as mock_build:
         mock_runner = AsyncMock()
         mock_runner.step_until_done = mock_step_until_done
         mock_runner.get_final_llm_resp = MagicMock(return_value=MagicMock(completion_text="决策完成"))
@@ -54,14 +54,25 @@ async def test_run_ai_decision(mock_context: MagicMock, sample_config_dict: dict
         )
         assert result is True
 
-    # 测试decision_provider生效
-    with patch('src.decision.build_main_agent') as mock_build:
-        mock_build.return_value = MagicMock(agent_runner=MagicMock(
-            step_until_done=AsyncMock(),
-            get_final_llm_resp=MagicMock(return_value=MagicMock(completion_text="ok"))
-        ))
+    # 测试 decision_provider 生效
+    with patch('astrbot_plugin_lite_initiative.src.decision.build_main_agent') as mock_build:
+
+        async def mock_step_until_done(timeout: int) -> AsyncGenerator:
+            yield
+
+        mock_runner = AsyncMock()
+        mock_runner.step_until_done = mock_step_until_done
+        mock_runner.get_final_llm_resp = MagicMock(return_value=MagicMock(completion_text="ok"))
+
+        mock_build.return_value = MagicMock(agent_runner=mock_runner)
+
         config_reader = ConfigReader({**sample_config_dict, "decision_provider": "test_provider"})
-        mock_context.provider_manager.get_provider_by_id.return_value = MagicMock()
+
+        from astrbot.core.provider.provider import Provider
+
+        mock_provider = MagicMock(spec=Provider)
+        mock_context.provider_manager.get_provider_by_id.return_value = mock_provider
+
         result = await run_ai_decision(
             context=mock_context,
             config_reader=config_reader,
@@ -69,9 +80,10 @@ async def test_run_ai_decision(mock_context: MagicMock, sample_config_dict: dict
             trigger_list=[],
             decision_prompt="prompt"
         )
+
         # provider 应该被传入 build_main_agent
         args, kwargs = mock_build.call_args
-        assert kwargs.get("provider") is not None
+        assert kwargs.get("provider") is mock_provider
 
 
 @pytest.mark.asyncio
@@ -85,7 +97,7 @@ async def test_run_trigger_agent(mock_context: MagicMock) -> None:
         extra_prompt="hello",
         direct_send=False   # 走agent
     )
-    with patch('src.decision.build_main_agent') as mock_build:
+    with patch('astrbot_plugin_lite_initiative.src.decision.build_main_agent') as mock_build:
         mock_runner = AsyncMock()
         mock_runner.step_until_done = mock_step_until_done
         mock_runner.get_final_llm_resp = MagicMock(return_value=MagicMock(completion_text="agent reply"))
@@ -121,8 +133,8 @@ async def test_run_trigger_plain(mock_context: MagicMock) -> None:
 async def test_run_trigger_dispatch(mock_context: MagicMock) -> None:
     trigger_agent = Trigger(direct_send=False, extra_prompt="agent")
     trigger_plain = Trigger(direct_send=True, extra_prompt="plain")
-    with patch('src.decision.run_trigger_agent', return_value=("agent", True)) as mock_agent:
-        with patch('src.decision.run_trigger_plain', return_value=("plain", True)) as mock_plain:
+    with patch('astrbot_plugin_lite_initiative.src.decision.run_trigger_agent', return_value=("agent", True)) as mock_agent:
+        with patch('astrbot_plugin_lite_initiative.src.decision.run_trigger_plain', return_value=("plain", True)) as mock_plain:
             config_reader = ConfigReader({})
             text, sent = await run_trigger(mock_context, config_reader, trigger_agent)
             mock_agent.assert_called_once()
@@ -193,7 +205,7 @@ def _make_old_history_msg() -> MagicMock:
 
 
 @pytest.mark.asyncio
-@patch('src.decision.build_agent_config')
+@patch('astrbot_plugin_lite_initiative.src.decision.build_agent_config')
 async def test_run_ai_decision_saves_send_message(
     mock_build_config: MagicMock,
     mock_context: MagicMock,
@@ -221,8 +233,8 @@ async def test_run_ai_decision_saves_send_message(
     mock_runner.step_until_done = mock_step_until_done
     mock_runner.get_final_llm_resp = MagicMock(return_value=MagicMock(completion_text="完成"))
 
-    with patch('src.decision.build_main_agent', return_value=MagicMock(agent_runner=mock_runner)):
-        with patch('src.decision.save_proactive_history') as mock_save:
+    with patch('astrbot_plugin_lite_initiative.src.decision.build_main_agent', return_value=MagicMock(agent_runner=mock_runner)):
+        with patch('astrbot_plugin_lite_initiative.src.decision.save_proactive_history') as mock_save:
             config_reader = ConfigReader(sample_config_dict)
             result = await run_ai_decision(
                 context=mock_context,
@@ -236,7 +248,7 @@ async def test_run_ai_decision_saves_send_message(
 
 
 @pytest.mark.asyncio
-@patch('src.decision.build_agent_config')
+@patch('astrbot_plugin_lite_initiative.src.decision.build_agent_config')
 async def test_run_ai_decision_cross_session(
     mock_build_config: MagicMock,
     mock_context: MagicMock,
@@ -262,8 +274,8 @@ async def test_run_ai_decision_cross_session(
     mock_runner.step_until_done = mock_step_until_done
     mock_runner.get_final_llm_resp = MagicMock(return_value=MagicMock(completion_text="完成"))
 
-    with patch('src.decision.build_main_agent', return_value=MagicMock(agent_runner=mock_runner)):
-        with patch('src.decision.save_proactive_history') as mock_save:
+    with patch('astrbot_plugin_lite_initiative.src.decision.build_main_agent', return_value=MagicMock(agent_runner=mock_runner)):
+        with patch('astrbot_plugin_lite_initiative.src.decision.save_proactive_history') as mock_save:
             config_reader = ConfigReader(sample_config_dict)
             await run_ai_decision(
                 context=mock_context,
@@ -287,8 +299,8 @@ async def test_run_ai_decision_skip_failed(
     mock_runner.step_until_done = AsyncMock()
     mock_runner.get_final_llm_resp = MagicMock(return_value=MagicMock(completion_text="完成"))
 
-    with patch('src.decision.build_main_agent', return_value=MagicMock(agent_runner=mock_runner)):
-        with patch('src.decision.save_proactive_history') as mock_save:
+    with patch('astrbot_plugin_lite_initiative.src.decision.build_main_agent', return_value=MagicMock(agent_runner=mock_runner)):
+        with patch('astrbot_plugin_lite_initiative.src.decision.save_proactive_history') as mock_save:
             config_reader = ConfigReader(sample_config_dict)
             await run_ai_decision(
                 context=mock_context,
@@ -315,8 +327,8 @@ async def test_run_ai_decision_no_tool_call(
     mock_runner.step_until_done = AsyncMock()
     mock_runner.get_final_llm_resp = MagicMock(return_value=MagicMock(completion_text="完成"))
 
-    with patch('src.decision.build_main_agent', return_value=MagicMock(agent_runner=mock_runner)):
-        with patch('src.decision.save_proactive_history') as mock_save:
+    with patch('astrbot_plugin_lite_initiative.src.decision.build_main_agent', return_value=MagicMock(agent_runner=mock_runner)):
+        with patch('astrbot_plugin_lite_initiative.src.decision.save_proactive_history') as mock_save:
             config_reader = ConfigReader(sample_config_dict)
             await run_ai_decision(
                 context=mock_context,
@@ -346,7 +358,7 @@ async def test_run_ai_decision_holiday_injection(
         config_reader = ConfigReader(config_dict)
 
         # 模拟 build_main_agent 直接返回
-        with patch('src.decision.build_main_agent') as mock_build:
+        with patch('astrbot_plugin_lite_initiative.src.decision.build_main_agent') as mock_build:
             mock_runner = AsyncMock()
 
             async def mock_step_until_done(timeout: int) -> AsyncGenerator:
@@ -384,7 +396,7 @@ async def test_run_ai_decision_holiday_injection(
         config_dict = {**sample_config_dict, "inject_date_tip": True}
         config_reader = ConfigReader(config_dict)
 
-        with patch('src.decision.build_main_agent') as mock_build:
+        with patch('astrbot_plugin_lite_initiative.src.decision.build_main_agent') as mock_build:
             mock_runner = AsyncMock()
 
             async def mock_step_until_done(timeout: int) -> AsyncGenerator:
@@ -415,7 +427,7 @@ async def test_run_ai_decision_holiday_injection(
         config_dict = {**sample_config_dict, "inject_date_tip": True}
         config_reader = ConfigReader(config_dict)
 
-        with patch('src.decision.build_main_agent') as mock_build:
+        with patch('astrbot_plugin_lite_initiative.src.decision.build_main_agent') as mock_build:
             mock_runner = AsyncMock()
 
             async def mock_step_until_done(timeout: int) -> AsyncGenerator:
@@ -446,7 +458,7 @@ async def test_run_ai_decision_holiday_injection_disabled(
     config_dict = {**sample_config_dict, "inject_date_tip": False}
     config_reader = ConfigReader(config_dict)
 
-    with patch('src.decision.build_main_agent') as mock_build:
+    with patch('astrbot_plugin_lite_initiative.src.decision.build_main_agent') as mock_build:
         mock_runner = AsyncMock()
         
         async def mock_step_until_done(timeout: int) -> AsyncGenerator:
@@ -484,7 +496,7 @@ async def test_run_ai_decision_holiday_import_error(
         config_dict = {**sample_config_dict, "inject_date_tip": True}
         config_reader = ConfigReader(config_dict)
 
-        with patch('src.decision.build_main_agent') as mock_build:
+        with patch('astrbot_plugin_lite_initiative.src.decision.build_main_agent') as mock_build:
             mock_runner = AsyncMock()
             
             async def mock_step_until_done(timeout: int) -> AsyncGenerator:

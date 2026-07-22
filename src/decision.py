@@ -6,15 +6,17 @@ from __future__ import annotations
 import json
 
 from typing import Optional
+from astrbot.api.star import Context
+from .config import ConfigReader
+from astrbot.core.provider.provider import Provider
 
 from astrbot.api import logger
 from astrbot.api.event import MessageChain
-
 from astrbot.core.cron.events import CronMessageEvent
 from astrbot.core.astr_main_agent import build_main_agent, MainAgentBuildConfig
 from astrbot.core.platform.message_session import MessageSession
 
-from .time_utils import _get_now_tz, _format_time_delta
+from .time_utils import _get_now_tz
 from .data_types import Trigger
 
 
@@ -56,8 +58,8 @@ def build_agent_config(context, umo: str) -> Optional[MainAgentBuildConfig]:
 
 
 async def run_ai_decision(
-    context,
-    config_reader,
+    context: Context,
+    config_reader: ConfigReader,
     umo: str,
     trigger_list: list,
     decision_prompt: str,
@@ -100,8 +102,7 @@ async def run_ai_decision(
             else:
                 holiday_tip = "📅 今日是非工作日。\n"
         except ImportError:
-
-            # chinese_calendar 未安装，忽略
+            logger.warning("[LiteInitiative] 未安装 chinese_calendar，无法注入节假日信息")
             pass
 
     suggest_direct_send = config_reader.get_suggest_direct_send()
@@ -149,10 +150,13 @@ async def run_ai_decision(
     
     try:
         session = MessageSession.from_str(umo)
+        user_id = session.session_id
         cron_event = CronMessageEvent(
             context=context,
             session=session,
             message=full_prompt,
+            sender_id=user_id,
+            sender_name=user_id,
             extras={"lite_initiative_decision": True},
         )
         
@@ -165,9 +169,11 @@ async def run_ai_decision(
         provider = None
         if decision_provider_id:
             try:
-                provider = await context.provider_manager.get_provider_by_id(decision_provider_id)
-                if provider is None:
-                    logger.info(f"[LiteInitiative] 未找到提供商 '{decision_provider_id}'，将使用默认模型。")
+                p = await context.provider_manager.get_provider_by_id(decision_provider_id)
+                if isinstance(p, Provider):
+                    provider = p
+                else:
+                    logger.info(f"[LiteInitiative] 提供商 '{decision_provider_id}' 不是聊天提供商，将使用默认模型。")
             except Exception as e:
                 logger.warning(f"[LiteInitiative] 获取提供商失败: {e}，使用默认模型。")
  
@@ -217,6 +223,7 @@ async def run_ai_decision(
                         func = tc.function
                         if not hasattr(func, "name") or func.name != "send_message_to_user":
                             continue
+                        
                         # 检查是否执行过且有成功结果
                         if not hasattr(tc, "id") or tc.id not in executed_tool_call_results:
                             continue

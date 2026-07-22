@@ -1,15 +1,7 @@
-import sys
-import os
-
 from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from astrbot.api.event import AstrMessageEvent
-
-
-plugin_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if plugin_parent not in sys.path:
-    sys.path.insert(0, plugin_parent)
 
 
 @pytest.fixture

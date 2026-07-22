@@ -1,4 +1,4 @@
-from src.config import ConfigReader
+from ..src.config import ConfigReader
 
 
 def test_config_reader_defaults() -> None:

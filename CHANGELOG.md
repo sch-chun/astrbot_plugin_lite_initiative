@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.6] - 2026-07-22
+
+### Fixed
+- 修复为修复测试自动发现而 sys.path.insert 导致插件间导入冲突的问题
+- 修复 CronMessage 以默认 sender_id 和 sender_name 发送消息的问题
+
 ## [0.2.5] - 2026-07-19
 
 ### Fixed

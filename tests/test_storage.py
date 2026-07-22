@@ -3,8 +3,8 @@ import os
 
 import pytest
 
-from src.storage import Storage
-from src.data_types import Trigger, SessionState
+from ..src.storage import Storage
+from ..src.data_types import Trigger, SessionState
 
 from pathlib import Path
 

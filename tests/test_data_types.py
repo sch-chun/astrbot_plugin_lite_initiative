@@ -1,6 +1,6 @@
 import time
 
-from src.data_types import Trigger, SessionState
+from ..src.data_types import Trigger, SessionState
 
 
 def test_trigger_to_from_dict() -> None:
@@ -46,6 +46,7 @@ def test_session_state_to_from_dict() -> None:
     s2 = SessionState.from_dict(d)
     assert s2.last_ai_reply_unix == s.last_ai_reply_unix
     assert s2.last_user_msg_unix == s.last_user_msg_unix
+    
     # timeout_task and decision_in_progress are not serialized
     assert s2.timeout_task is None
     assert s2.decision_in_progress is False

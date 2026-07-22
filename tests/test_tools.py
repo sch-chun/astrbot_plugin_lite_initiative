@@ -3,15 +3,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import time
 
-from src.tools import (
+from ..src.tools import (
     ListTriggersTool,
     CreateTriggerTool,
     DeleteTriggerTool,
     UpdateTriggerTool,
 )
-from src.data_types import Trigger
-from src.config import ConfigReader
-import src.tools
+from ..src import tools
+from ..src.data_types import Trigger
+from ..src.config import ConfigReader
 
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.astr_agent_context import AstrAgentContext
@@ -55,10 +55,10 @@ def mock_event() -> MagicMock:
 @pytest.fixture(autouse=True)
 def setup_tools_plugin(mock_plugin: MagicMock) -> Generator:
     """自动在所有测试前设置 tools 模块的 plugin"""
-    original_plugin = src.tools._plugin
-    src.tools._plugin = mock_plugin
+    original_plugin = tools._plugin
+    tools._plugin = mock_plugin
     yield
-    src.tools._plugin = original_plugin
+    tools._plugin = original_plugin
 
 
 @pytest.mark.asyncio
@@ -87,7 +87,7 @@ async def test_create_trigger_tool(mock_plugin: MagicMock, mock_event: MagicMock
     assert "缺少必填参数" in result
 
     # 成功创建
-    with patch('src.tools._get_now_tz') as mock_now:
+    with patch('astrbot_plugin_lite_initiative.src.tools._get_now_tz') as mock_now:
         from datetime import datetime
         mock_now.return_value = datetime(2026, 1, 1, 12, 0, 0)
         result = await tool.call(ctx, fire_at_str="13:30:00", extra_prompt="hello", direct_send=True)
@@ -109,14 +109,14 @@ async def test_create_trigger_tool(mock_plugin: MagicMock, mock_event: MagicMock
 
     # 睡眠时段拒绝
     mock_plugin._config.cfg["max_triggers"] = 5
-    with patch('src.tools._get_now_tz') as mock_now:
+    with patch('astrbot_plugin_lite_initiative.src.tools._get_now_tz') as mock_now:
         mock_now.return_value = datetime(2026, 1, 1, 1, 0, 0)
         result = await tool.call(ctx, fire_at_str="02:00:00")
         assert "睡眠时段内" in result
 
     # 最小延迟拒绝
     mock_plugin._config.cfg["min_trigger_delay"] = 60
-    with patch('src.tools._get_now_tz') as mock_now:
+    with patch('astrbot_plugin_lite_initiative.src.tools._get_now_tz') as mock_now:
         mock_now.return_value = datetime(2026, 1, 1, 12, 0, 0)
         result = await tool.call(ctx, fire_at_str="12:00:10")  # 10秒后
         assert "必须至少延迟" in result
@@ -159,6 +159,6 @@ async def test_update_trigger_tool(mock_plugin: MagicMock, mock_event: MagicMock
     assert t.direct_send is False
 
     # 更新到睡眠时段拒绝
-    with patch('src.tools._is_in_sleep_hours', return_value=True):
+    with patch('astrbot_plugin_lite_initiative.src.tools._is_in_sleep_hours', return_value=True):
         result = await tool.call(ctx, trigger_id="upd", fire_at_unix=100.0)
         assert "睡眠时段内" in result
